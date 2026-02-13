@@ -1,7 +1,7 @@
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    // Flutter Gradle Plugin, Android ve Kotlin pluginlerinden sonra gelmeli
     id("dev.flutter.flutter-gradle-plugin")
 }
 
@@ -20,17 +20,20 @@ android {
     }
 
     defaultConfig {
-    applicationId "com.example.yourapp"   // sende neyse o
-    minSdkVersion 21
-    targetSdkVersion flutter.targetSdkVersion
-    versionCode flutterVersionCode.toInteger()
-    versionName flutterVersionName
-}
+        // Kendi package id'n neyse onu yaz
+        applicationId = "com.example.merge_blocks"
+
+        // shared_preferences_android için güvenli alt sınır
+        minSdk = 21
+
+        targetSdk = flutter.targetSdkVersion
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // Şimdilik debug signing (CI/build için yeterli)
             signingConfig = signingConfigs.getByName("debug")
         }
     }
