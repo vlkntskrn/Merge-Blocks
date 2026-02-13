@@ -1300,32 +1300,46 @@ void _startLevel(int idx, {bool hardReset = false}) {
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, c) {
-                    const toolW = 120.0;
-                    final usableW = max(120.0, c.maxWidth - toolW * 2 - 8);
-                    final usableH = c.maxHeight;
+                    const sideW = 66.0; // görsel panel genişliği
+                    const edgePad = 6.0;
                     final ratio = rows / cols;
 
-                    double boardW = usableW;
+                    // Board artık ekranı çok daha fazla kullansın:
+                    // Yatayda neredeyse tam genişlik, dikeyde mevcut alana sığacak şekilde.
+                    double boardW = c.maxWidth - edgePad * 2;
                     double boardH = boardW * ratio;
-                    if (boardH > usableH) {
-                      boardH = usableH;
+                    if (boardH > c.maxHeight - edgePad * 2) {
+                      boardH = c.maxHeight - edgePad * 2;
                       boardW = boardH / ratio;
                     }
+
+                    // Çok dar ekranlarda minimum güvenli sınır
+                    boardW = max(180.0, boardW);
+                    boardH = max(260.0, boardH);
+
                     final boardSize = Size(boardW, boardH);
 
-                    return Row(
+                    return Stack(
                       children: [
-                        SizedBox(width: toolW, child: _sidePanelLeft()), // tüm ikonlar burada
-                        Expanded(
-                          child: Center(
-                            child: SizedBox(
-                              width: boardW,
-                              height: boardH,
-                              child: _buildBoard(boardSize),
-                            ),
+                        Center(
+                          child: SizedBox(
+                            width: boardW,
+                            height: boardH,
+                            child: _buildBoard(boardSize),
                           ),
                         ),
-                        SizedBox(width: toolW, child: _adPanelRight()), // boş tarafa reklam alanı
+                        Positioned(
+                          left: 0,
+                          top: max(0.0, (c.maxHeight - 190) / 2),
+                          width: sideW,
+                          child: _sidePanelLeft(),
+                        ),
+                        Positioned(
+                          right: 0,
+                          top: max(0.0, (c.maxHeight - 190) / 2),
+                          width: sideW,
+                          child: _adPanelRight(),
+                        ),
                       ],
                     );
                   },
