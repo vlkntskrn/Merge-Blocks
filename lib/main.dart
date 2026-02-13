@@ -24,7 +24,7 @@ class BlockerCrackPainter extends CustomPainter {
     final p = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = hp == 2 ? 1.8 : 2.2
-      ..color = Colors.black.withValues(alpha: hp == 2 ? 0.28 : 0.40)
+      ..color = Colors.black.withOpacity( hp == 2 ? 0.28 : 0.40)
       ..strokeCap = StrokeCap.round;
 
     if (hp >= 3) return;
@@ -48,7 +48,7 @@ class BlockerCrackPainter extends CustomPainter {
       final p2 = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.4
-        ..color = Colors.black.withValues(alpha: 0.50)
+        ..color = Colors.black.withOpacity( 0.50)
         ..strokeCap = StrokeCap.round;
 
       final path2 = Path()
@@ -91,7 +91,7 @@ enum AppLang { tr, en }
 enum NumFmt { tr, en }
 enum FxMode { low, high }
 enum GoalType { reachValue, clearBlockers, comboCount }
-enum GameMode { endless }
+enum GameMode { campaign, endless }
 
 class Cell {
   int value;
@@ -325,7 +325,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   AppLang lang = AppLang.tr;
   NumFmt numFmt = NumFmt.tr;
   FxMode fxMode = FxMode.high;
-  GameMode mode = GameMode.endless;
+  GameMode mode = GameMode.campaign;
   bool sfxOn = true;
   bool testMode = false;
   bool autoNextOn = true;
@@ -560,6 +560,9 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
   LevelConfig get lv {
+    if (mode == GameMode.campaign) {
+      return campaignLevels[levelIdx.clamp(0, 99)];
+    }
     final logical = max(101, levelIdx + 1);
     return _generateEndlessLevel(logical);
   }
@@ -593,7 +596,8 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
       sfxOn = p.getBool(_kSfx) ?? true;
       fxMode = (p.getString(_kFx) ?? 'high') == 'low' ? FxMode.low : FxMode.high;
       testMode = p.getBool(_kTest) ?? false;
-      mode = GameMode.endless;
+      mode = (p.getString(_kMode) ?? 'campaign') == 'endless' ? GameMode.endless : GameMode.campaign;
+      if (mode == GameMode.campaign && levelIdx > 99) levelIdx = 99;
       if (mode == GameMode.endless && levelIdx < 100) levelIdx = 100;
     });
     _startLevel(levelIdx);
@@ -624,7 +628,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
         score: int.tryParse(s[1]) ?? 0,
         level: int.tryParse(s[2]) ?? 1,
         date: DateTime.tryParse(s[3]) ?? DateTime.now(),
-        mode: GameMode.endless,
+        mode: (s.length > 4 && s[4] == 'endless') ? GameMode.endless : GameMode.campaign,
       );
     }).toList();
   }
@@ -654,12 +658,12 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
 
   Future<void> _showLeaderboardDialog() async {
     final local = await _loadLocalLb();
-    final localCampaign = local.where((e) => e.mode == GameMode.endless).toList()
+    final localCampaign = local.where((e) => e.mode == GameMode.campaign).toList()
       ..sort((a, b) => b.score.compareTo(a.score));
     final localEndless = local.where((e) => e.mode == GameMode.endless).toList()
       ..sort((a, b) => b.score.compareTo(a.score));
 
-    final onlineCampaign = await onlineLb.fetchTop(mode: GameMode.endless, limit: 30);
+    final onlineCampaign = await onlineLb.fetchTop(mode: GameMode.campaign, limit: 30);
     final onlineEndless = await onlineLb.fetchTop(mode: GameMode.endless, limit: 30);
 
     if (!mounted) return;
@@ -739,7 +743,11 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
 void _startLevel(int idx, {bool hardReset = false}) {
-    levelIdx = max(100, idx).toInt();
+    if (mode == GameMode.campaign) {
+      levelIdx = idx.clamp(0, 99).toInt();
+    } else {
+      levelIdx = max(100, idx).toInt();
+    }
 
     if (hardReset) {
       score = 0;
@@ -798,7 +806,17 @@ void _startLevel(int idx, {bool hardReset = false}) {
 
   void _quickSkipLevel() {
     if (!testMode) return;
-    _startLevel(levelIdx + 1);
+    if (mode == GameMode.campaign) {
+      if (levelIdx < 99) {
+        if (levelIdx + 2 > unlockedCampaign) unlockedCampaign = (levelIdx + 2).clamp(1, 100).toInt();
+        _startLevel(levelIdx + 1);
+      } else {
+        mode = GameMode.endless;
+        _startLevel(100);
+      }
+    } else {
+      _startLevel(levelIdx + 1);
+    }
     _saveProgress();
     setState(() {});
   }
@@ -1023,6 +1041,12 @@ void _startLevel(int idx, {bool hardReset = false}) {
       swaps += earned;
       await _submitLb();
 
+      if (mode == GameMode.campaign) {
+        if (levelIdx + 2 > unlockedCampaign) {
+          unlockedCampaign = (levelIdx + 2).clamp(1, 100).toInt();
+        }
+      }
+
       await _saveProgress();
       if (!mounted) return;
 
@@ -1034,7 +1058,17 @@ void _startLevel(int idx, {bool hardReset = false}) {
         await Future.delayed(const Duration(milliseconds: 280)); // tiny continue-delay
         if (!mounted) return;
 
-        _startLevel(levelIdx + 1);
+        if (mode == GameMode.campaign) {
+          if (levelIdx < 99) {
+            _startLevel(levelIdx + 1);
+          } else {
+            // Kampanya bitti -> endless
+            mode = GameMode.endless;
+            _startLevel(100);
+          }
+        } else {
+          _startLevel(levelIdx + 1);
+        }
 
         _rebuildValueColorMapFromGrid();
         await _saveProgress();
@@ -1150,6 +1184,16 @@ void _startLevel(int idx, {bool hardReset = false}) {
     await p.setBool(_kBlockerTipSeen, true);
   }
 
+  String _goalText() {
+    switch (lv.goalType) {
+      case GoalType.reachValue:
+        return lang == AppLang.tr ? 'Hedefe ulaş' : 'Reach target';
+      case GoalType.clearBlockers:
+        return lang == AppLang.tr ? 'Engeller: $blockersRemaining' : 'Blockers: $blockersRemaining';
+      case GoalType.comboCount:
+        return lang == AppLang.tr ? 'Combo ${lv.goalAmount}+ (şu an $bestComboThisLevel)' : 'Combo ${lv.goalAmount}+ (now $bestComboThisLevel)';
+    }
+  }
 
   // Küsuratsız kısa sayı
   String shortNumBig(BigInt n) {
@@ -1198,8 +1242,8 @@ void _startLevel(int idx, {bool hardReset = false}) {
         fontSize: s,
         fontWeight: FontWeight.w900,
         shadows: [
-          Shadow(color: c.withValues(alpha: 0.95), blurRadius: 10),
-          Shadow(color: c.withValues(alpha: 0.45), blurRadius: 22),
+          Shadow(color: c.withOpacity( 0.95), blurRadius: 10),
+          Shadow(color: c.withOpacity( 0.45), blurRadius: 22),
         ],
       );
 
@@ -1208,8 +1252,8 @@ void _startLevel(int idx, {bool hardReset = false}) {
         decoration: BoxDecoration(
           color: const Color(0xFF21193C),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withValues(alpha: 0.58)),
-          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.25), blurRadius: 8)],
+          border: Border.all(color: color.withOpacity( 0.58)),
+          boxShadow: [BoxShadow(color: color.withOpacity( 0.25), blurRadius: 8)],
         ),
         child: Text(txt, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 13)),
       );
@@ -1233,7 +1277,7 @@ void _startLevel(int idx, {bool hardReset = false}) {
       backgroundColor: const Color(0xFF0B0A16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF17132C),
-        title: Text('${t('title')} • ${t('mode')}: ${t('endless')}',
+        title: Text('${t('title')} • ${t('mode')}: ${mode == GameMode.campaign ? t('campaign') : t('endless')}',
             style: _neon(const Color(0xFF39FF14), 18)),
         centerTitle: true,
         actions: [
@@ -1262,7 +1306,7 @@ void _startLevel(int idx, {bool hardReset = false}) {
                 if (v == 'auto_next') autoNextOn = !autoNextOn;
                 if (v == 'test') testMode = !testMode;
                 if (v == 'mode_campaign') {
-                  mode = GameMode.endless;
+                  mode = GameMode.campaign;
                   levelIdx = (unlockedCampaign - 1).clamp(0, 99);
                   _startLevel(levelIdx);
                   _rebuildValueColorMapFromGrid();
@@ -1300,18 +1344,19 @@ void _startLevel(int idx, {bool hardReset = false}) {
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
           child: Column(
             children: [
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                alignment: WrapAlignment.center,
-                children: [
-                  _chip('${t('level')}: ${lv.index}'),
-                  _chip('${t('score')}: $score'),
-                  _chip('${t('best')}: $best'),
-                ],
-              ),
-              const SizedBox(height: 8),
-              _topBanner(),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                _chip('${t('level')}: ${lv.index}'),
+                if (mode == GameMode.campaign) _chip('${t('unlocked')}: $unlockedCampaign', color: const Color(0xFFB388FF)),
+                _chip('${t('score')}: $score'),
+                _chip('${t('best')}: $best'),
+                _chip('${t('max')}: ${shortNumBig(topBig)}'),
+                _chip('${t('target')}: ${shortNumBig(target)}', color: const Color(0xFFFF4DFF)),
+                _chip('${t('move')}: $moves/${lv.move1}', color: const Color(0xFF39FF14)),
+                _chip('↔ $swaps', color: const Color(0xFF40C4FF)),
+                _chip('${t('episode')}: ${lv.episodeName}', color: const Color(0xFFFFD740)),
+                _chip('${t('goal')}: ${_goalText()}', color: const Color(0xFF64FFDA)),
+                if (testMode) _chip('TEST', color: const Color(0xFFFF5252)),
+              ]),
               const SizedBox(height: 6),
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
@@ -1326,8 +1371,9 @@ void _startLevel(int idx, {bool hardReset = false}) {
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, c) {
-                    final usableW = c.maxWidth;
-                    final usableH = c.maxHeight - 8;
+                    const toolW = 88.0;
+                    final usableW = max(190.0, c.maxWidth - toolW * 2 - 2);
+                    final usableH = c.maxHeight;
                     final ratio = rows / cols;
 
                     double boardW = usableW;
@@ -1338,15 +1384,19 @@ void _startLevel(int idx, {bool hardReset = false}) {
                     }
                     final boardSize = Size(boardW, boardH);
 
-                    return Column(
+                    return Row(
                       children: [
+                        SizedBox(width: toolW, child: _sidePanelLeft()), // tüm ikonlar burada
                         Expanded(
                           child: Center(
-                            child: SizedBox(width: boardW, height: boardH, child: _buildBoard(boardSize)),
+                            child: SizedBox(
+                              width: boardW,
+                              height: boardH,
+                              child: _buildBoard(boardSize),
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 6),
-                        _bottomActionsBar(),
+                        SizedBox(width: toolW, child: _adPanelRight()), // boş tarafa reklam alanı
                       ],
                     );
                   },
@@ -1359,56 +1409,178 @@ void _startLevel(int idx, {bool hardReset = false}) {
     );
   }
 
+  Widget _sidePanelLeft() {
+    return LayoutBuilder(
+      builder: (context, c) => SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: c.maxHeight),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+        _logoCard('MERGE BLOCKS', mode == GameMode.campaign ? 'CAMP' : 'ENDL'),
+        const SizedBox(height: 6),
+        _logoCard('NEON', 'GRID'),
+        const SizedBox(height: 8),
+        _sideBtn(
+          icon: swapMode ? Icons.close : Icons.swap_horiz,
+          label: '$swaps',
+          onTap: (swaps > 0 && !isBusy)
+              ? () {
+                  setState(() {
+                    swapMode = !swapMode;
+                    if (!swapMode) swapFirst = null;
+                  });
+                  _saveProgress();
+                }
+              : null,
+        ),
+        const SizedBox(height: 6),
+        _sideBtn(
+          icon: Icons.play_circle_fill,
+          label: '+1',
+          onTap: !isBusy
+              ? () async {
+                  final ready = await adService.isAdReady();
+                  if (!ready) await adService.loadAd();
+                  await adService.showAd(onReward: () {
+                    setState(() => swaps++);
+                    _saveProgress();
+                  });
+                }
+              : null,
+        ),
+        const SizedBox(height: 6),
+        _sideBtn(icon: Icons.emoji_events, label: 'TOP', onTap: _showLeaderboardDialog),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-  Widget _topBanner() {
+  Widget _adPanelRight() {
+    // Reklam SDK bağlama noktası: gerçek banner widget buraya yerleştirilebilir.
+    return LayoutBuilder(
+      builder: (context, c) => SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: c.maxHeight),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 52,
+                height: 210,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0xFF1A1533), Color(0xFF0F0B23)],
+                  ),
+                  border: Border.all(color: const Color(0xFF6A52D9), width: 1.2),
+                  boxShadow: const [BoxShadow(color: Color(0x3300E5FF), blurRadius: 8)],
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.campaign, color: Color(0xFF00E5FF), size: 18),
+                    const SizedBox(height: 8),
+                    RotatedBox(
+                      quarterTurns: 3,
+                      child: Text(
+                        lang == AppLang.tr ? 'REKLAM BANNER' : 'AD BANNER',
+                        style: const TextStyle(
+                          color: Color(0xFFB0BEC5),
+                          fontWeight: FontWeight.w800,
+                          fontSize: 10,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: 34,
+                      height: 70,
+                      decoration: BoxDecoration(
+                        color: const Color(0x2211CFFF),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0x5588E5FF)),
+                      ),
+                      alignment: Alignment.center,
+                      child: const Text(
+                        '320x50 / Adaptive',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Color(0xFF90A4AE),
+                          fontSize: 8,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _logoCard(String a, String b) {
     return Container(
-      width: double.infinity,
-      height: 42,
+      width: 50,
+      height: 96,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        gradient: const LinearGradient(colors: [Color(0xFF1A1440), Color(0xFF102D55)]),
-        border: Border.all(color: const Color(0xFF40C4FF), width: 1.2),
+        gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF2B2152), Color(0xFF171129)]),
+        border: Border.all(color: const Color(0xFF6A52D9), width: 1.2),
+        boxShadow: const [BoxShadow(color: Color(0x3300E5FF), blurRadius: 8)],
       ),
-      child: const Center(
-        child: Text('REKLAM BANNER', style: TextStyle(color: Color(0xFF7DF9FF), fontWeight: FontWeight.bold)),
-      ),
-    );
-  }
-
-  Widget _bottomActionsBar() {
-    return Row(
-      children: [
-        Expanded(child: _premiumActionBtn(icon: swapMode ? Icons.close : Icons.swap_horiz, label: 'Kaydır ($swaps)', onTap: (swaps > 0 && !isBusy) ? () { setState(() { swapMode = !swapMode; if (!swapMode) swapFirst = null;}); _saveProgress(); } : null)),
-        const SizedBox(width: 10),
-        Expanded(child: _premiumActionBtn(icon: Icons.play_circle_fill, label: 'Reklam İzle +1', onTap: !isBusy ? () async { final ready = await adService.isAdReady(); if (!ready) await adService.loadAd(); await adService.showAd(onReward: () { setState(() => swaps++); _saveProgress();}); } : null)),
-        const SizedBox(width: 10),
-        Expanded(child: _premiumActionBtn(icon: Icons.emoji_events, label: 'Top Skor', onTap: _showLeaderboardDialog)),
-      ],
-    );
-  }
-
-  Widget _premiumActionBtn({required IconData icon, required String label, required VoidCallback? onTap}) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Ink(
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            gradient: const LinearGradient(colors: [Color(0xFF3E2D8F), Color(0xFF0088CC)]),
-            boxShadow: const [
-              BoxShadow(color: Color(0x6600E5FF), blurRadius: 10, offset: Offset(0, 4)),
-              BoxShadow(color: Color(0x332A1A6F), blurRadius: 2, offset: Offset(0, -1)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 1.0, vertical: 1.0),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(a, maxLines: 1, overflow: TextOverflow.visible, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Color(0xFF39FF14))),
+              const SizedBox(height: 1),
+              Text(b, maxLines: 1, overflow: TextOverflow.visible, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: Color(0xFFFF4DFF))),
+              const SizedBox(height: 4),
+              const Icon(Icons.auto_awesome, size: 14, color: Color(0xFF00E5FF)),
             ],
-            border: Border.all(color: const Color(0xFF7DF9FF), width: 1.2),
           ),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, color: Colors.white, size: 28),
-            const SizedBox(height: 6),
-            Text(label, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
-          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _sideBtn({required IconData icon, required String label, VoidCallback? onTap}) {
+    return Material(
+      color: const Color(0xFF231B42),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          width: 48,
+          height: 56,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFF6A52D9), width: 1.2),
+            boxShadow: const [BoxShadow(color: Color(0x3300E5FF), blurRadius: 8)],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 22, color: Colors.white),
+              if (label.isNotEmpty) Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800)),
+            ],
+          ),
         ),
       ),
     );
@@ -1689,7 +1861,7 @@ if (_isLevelGoalCompleted() && mounted) {
                         colors: [
                           const Color(0xCC1A1240),
                           const Color(0xE60E0A22),
-                          Colors.black.withValues(alpha: 0.88),
+                          Colors.black.withOpacity( 0.88),
                         ],
                       ),
                     ),
@@ -1829,13 +2001,13 @@ if (_isLevelGoalCompleted() && mounted) {
                   width: sw ? 3 : (sel ? 2 : 1),
                 ),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 7, offset: const Offset(0, 3)),
-                  if (sel) BoxShadow(color: Colors.white.withValues(alpha: glowAnim.value), blurRadius: 8),
+                  BoxShadow(color: Colors.black.withOpacity( 0.35), blurRadius: 7, offset: const Offset(0, 3)),
+                  if (sel) BoxShadow(color: Colors.white.withOpacity( glowAnim.value), blurRadius: 8),
                 ],
               ),
               child: Stack(
                 children: [
-                  Positioned(left: 5, right: 5, top: 4, child: Container(height: 8, decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.22), borderRadius: BorderRadius.circular(8)))),
+                  Positioned(left: 5, right: 5, top: 4, child: Container(height: 8, decoration: BoxDecoration(color: Colors.white.withOpacity( 0.22), borderRadius: BorderRadius.circular(8)))),
                   Center(
                     child: cell.blocked
                         ? Transform.scale(
@@ -1857,7 +2029,7 @@ if (_isLevelGoalCompleted() && mounted) {
                             ),
                           ),
 
-                                  Icon(Icons.lock, color: Colors.white.withValues(alpha: 0.95), size: 16),
+                                  Icon(Icons.lock, color: Colors.white.withOpacity( 0.95), size: 16),
                                   Text('HP ${cell.blockerHp}', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900)),
                                 ]),
                           )
@@ -1923,14 +2095,14 @@ class PathPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = lowFx ? 6 : 10
         ..strokeCap = StrokeCap.round
-        ..shader = LinearGradient(colors: [dark.withValues(alpha: 0.9), dark]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)));
+        ..shader = LinearGradient(colors: [dark.withOpacity( 0.9), dark]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)));
 
       if (!lowFx) {
         final glowPaint = Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 16
           ..strokeCap = StrokeCap.round
-          ..shader = LinearGradient(colors: [dark.withValues(alpha: 0.55), dark.withValues(alpha: 0.95)]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)))
+          ..shader = LinearGradient(colors: [dark.withOpacity( 0.55), dark.withOpacity( 0.95)]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)))
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
         canvas.drawLine(Offset(x1, y1), Offset(x2, y2), glowPaint);
       }
@@ -1941,17 +2113,17 @@ class PathPainter extends CustomPainter {
         final local = (energyPhase + i * 0.17) % 1.0;
         final ex = x1 + (x2 - x1) * local;
         final ey = y1 + (y2 - y1) * local;
-        final eColor = Color.lerp(Colors.white, const Color(0xFF00E5FF), t)!.withValues(alpha: 0.95);
+        final eColor = Color.lerp(Colors.white, const Color(0xFF00E5FF), t)!.withOpacity( 0.95);
         final ePaint = Paint()..color = eColor..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
         canvas.drawCircle(Offset(ex, ey), 6.0, ePaint);
-        canvas.drawCircle(Offset(ex, ey), 2.6, Paint()..color = Colors.white.withValues(alpha: 0.95));
+        canvas.drawCircle(Offset(ex, ey), 2.6, Paint()..color = Colors.white.withOpacity( 0.95));
       }
 
       final shine = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = lowFx ? 2 : 4
         ..strokeCap = StrokeCap.round
-        ..color = Colors.white.withValues(alpha: (0.42 - 0.18 * t + glow * 0.15).clamp(0.12, 0.58));
+        ..color = Colors.white.withOpacity( (0.42 - 0.18 * t + glow * 0.15).clamp(0.12, 0.58));
       canvas.drawLine(Offset(x1, y1), Offset(x2, y2), shine);
     }
   }
@@ -1977,7 +2149,7 @@ class PopPainter extends CustomPainter {
     for (final c in cells) {
       final cx = boardPadding + c.c * (cw + gap) + cw / 2, cy = boardPadding + c.r * (ch + gap) + ch / 2;
       final rect = Rect.fromCenter(center: Offset(cx, cy), width: cw * scale, height: ch * scale);
-      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(12)), Paint()..color = Colors.white.withValues(alpha: 0.65 * alpha));
+      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(12)), Paint()..color = Colors.white.withOpacity( 0.65 * alpha));
     }
   }
 
@@ -1994,7 +2166,7 @@ class ParticlesPainter extends CustomPainter {
     for (final p in particles) {
       final dx = cos(p.angle) * p.speed * t, dy = sin(p.angle) * p.speed * t;
       final pos = Offset(p.origin.dx + dx, p.origin.dy + dy);
-      canvas.drawCircle(pos, 1.7 + (1 - t) * 2.0, Paint()..color = p.color.withValues(alpha: (1 - t).clamp(0.0, 1.0)));
+      canvas.drawCircle(pos, 1.7 + (1 - t) * 2.0, Paint()..color = p.color.withOpacity( (1 - t).clamp(0.0, 1.0)));
     }
   }
   @override
