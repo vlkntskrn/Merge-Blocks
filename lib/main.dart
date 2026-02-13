@@ -2,8 +2,8 @@
 // Özellikler:
 // - Campaign (1-100) + Endless (101+) mod
 // - Dengeli hedef eğrisi (segmentli + log destekli), BigInt güvenli
-// - Her 10 bölümde Episode farklılığı (mekanik varyasyonları)
-// - Test Mode + Quick Skip
+// - Her 10 bölümde  farklılığı (mekanik varyasyonları)
+// - Test Mode + 
 // - Swap-only ekonomi (bomba yok)
 // - AdMob Rewarded entegrasyon noktası (mock servis)
 // - Leaderboard altyapısı (local + online mock)
@@ -91,7 +91,7 @@ enum AppLang { tr, en }
 enum NumFmt { tr, en }
 enum FxMode { low, high }
 enum GoalType { reachValue, clearBlockers, comboCount }
-enum GameMode { campaign, endless }
+enum GameMode { endless }
 
 class Cell {
   int value;
@@ -310,7 +310,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   final RewardedAdService adService = MockRewardedAdService();
   final OnlineLeaderboardService onlineLb = MockOnlineLeaderboardService();
 
-  late List<List<Cell>> grid;
+  List<List<Cell>> grid = List.generate(rows, (_) => List.generate(cols, (_) => Cell(2)));
   late final List<LevelConfig> campaignLevels;
 
   int levelIdx = 0; // campaign index 0..99, endless logical >99
@@ -325,7 +325,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   AppLang lang = AppLang.tr;
   NumFmt numFmt = NumFmt.tr;
   FxMode fxMode = FxMode.high;
-  GameMode mode = GameMode.campaign;
+  GameMode mode = GameMode.endless;
   bool sfxOn = true;
   bool testMode = false;
   bool autoNextOn = true;
@@ -353,7 +353,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
 
   // blocker tooltip + episode intro overlays
   bool showBlockerTip = false;
-  bool showEpisodeIntro = false;
+  bool showIntro = false;
   String episodeIntroTitle = '';
   String episodeIntroRule = '';
   static const _kBlockerTipSeen = 'u2248_v14.8_blocker_tip_seen';
@@ -473,7 +473,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   LevelConfig _generateEndlessLevel(int n) {
     final target = _targetForLevel(n);
     final epCycle = ((n - 101) ~/ 10) % 5;
-    String ep = 'Endless Classic';
+    String ep = '';
     int blockers = 0;
     bool frozen = false;
     bool gate = false;
@@ -483,7 +483,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
 
     switch (epCycle) {
       case 0:
-        ep = 'Endless Classic';
+        ep = '';
         break;
       case 1:
         ep = 'Endless Blockers';
@@ -560,9 +560,6 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
   LevelConfig get lv {
-    if (mode == GameMode.campaign) {
-      return campaignLevels[levelIdx.clamp(0, 99)];
-    }
     final logical = max(101, levelIdx + 1);
     return _generateEndlessLevel(logical);
   }
@@ -578,9 +575,36 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
   List<int> _spawnPoolForLevel(int logicalLevel) {
-    // min seed level based
-    final startPow = min(1 + (logicalLevel - 1), 24);
-    return List.generate(5, (i) => 1 << (startPow + i));
+    // Endless custom spawn sequence
+    const seq = <int>[
+      2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,
+      10000,20000,40000,80000,160000,320000,640000,
+      1250000,2500000,5000000,10000000,20000000,40000000,80000000,
+      160000000,320000000,640000000,
+      1250000000,2500000000,5000000000,10000000000,20000000000,40000000000,80000000000,
+      160000000000,320000000000,640000000000
+    ];
+
+    final currentMax = _maxTileBig();
+
+    // 2048'e ulaşana kadar: 32'den büyük spawn yok.
+    if (currentMax < BigInt.from(2048)) {
+      return const [2, 4, 8, 16, 32];
+    }
+
+    // 2048 sonrası: her yeni maksimum kademede aktif en küçük değer 1 kademe yukarı kayar.
+    int maxIdx = 0;
+    for (int i = 0; i < seq.length; i++) {
+      if (BigInt.from(seq[i]) <= currentMax) maxIdx = i;
+    }
+
+    // seq[10] = 2048. maxIdx her arttığında minIdx de 1 artsın.
+    int minIdx = min(maxIdx - 10, seq.length - 7);
+    if (minIdx < 0) minIdx = 0;
+
+    // Aktif havuz her zaman 7 sayı
+    final end = min(minIdx + 7, seq.length);
+    return seq.sublist(minIdx, end);
   }
 
   // ---------- Persistence ----------
@@ -596,8 +620,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
       sfxOn = p.getBool(_kSfx) ?? true;
       fxMode = (p.getString(_kFx) ?? 'high') == 'low' ? FxMode.low : FxMode.high;
       testMode = p.getBool(_kTest) ?? false;
-      mode = (p.getString(_kMode) ?? 'campaign') == 'endless' ? GameMode.endless : GameMode.campaign;
-      if (mode == GameMode.campaign && levelIdx > 99) levelIdx = 99;
+      mode = GameMode.endless;
       if (mode == GameMode.endless && levelIdx < 100) levelIdx = 100;
     });
     _startLevel(levelIdx);
@@ -628,7 +651,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
         score: int.tryParse(s[1]) ?? 0,
         level: int.tryParse(s[2]) ?? 1,
         date: DateTime.tryParse(s[3]) ?? DateTime.now(),
-        mode: (s.length > 4 && s[4] == 'endless') ? GameMode.endless : GameMode.campaign,
+        mode: GameMode.endless,
       );
     }).toList();
   }
@@ -658,12 +681,12 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
 
   Future<void> _showLeaderboardDialog() async {
     final local = await _loadLocalLb();
-    final localCampaign = local.where((e) => e.mode == GameMode.campaign).toList()
+    final localCampaign = local.where((e) => e.mode == GameMode.endless).toList()
       ..sort((a, b) => b.score.compareTo(a.score));
     final localEndless = local.where((e) => e.mode == GameMode.endless).toList()
       ..sort((a, b) => b.score.compareTo(a.score));
 
-    final onlineCampaign = await onlineLb.fetchTop(mode: GameMode.campaign, limit: 30);
+    final onlineCampaign = await onlineLb.fetchTop(mode: GameMode.endless, limit: 30);
     final onlineEndless = await onlineLb.fetchTop(mode: GameMode.endless, limit: 30);
 
     if (!mounted) return;
@@ -671,7 +694,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF171129),
-        title: Text(lang == AppLang.tr ? 'Liderlik Tablosu' : 'Leaderboard'),
+        title: const SizedBox.shrink(),
         content: SizedBox(
           width: 380,
           child: DefaultTabController(
@@ -721,7 +744,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
           dense: true,
           leading: Text('#${i + 1}', style: const TextStyle(fontWeight: FontWeight.w900)),
           title: Text('${e.name} • ${e.score}'),
-          subtitle: Text('${lang == AppLang.tr ? "Bölüm" : "Level"} ${e.level}'),
+          subtitle: Text('${lang == AppLang.tr ? "" : "Level"} ${e.level}'),
         );
       },
     );
@@ -743,11 +766,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
 void _startLevel(int idx, {bool hardReset = false}) {
-    if (mode == GameMode.campaign) {
-      levelIdx = idx.clamp(0, 99).toInt();
-    } else {
-      levelIdx = max(100, idx).toInt();
-    }
+    levelIdx = max(100, idx).toInt();
 
     if (hardReset) {
       score = 0;
@@ -800,23 +819,13 @@ void _startLevel(int idx, {bool hardReset = false}) {
 
     setState(() {});
     _saveProgress();
-    _maybeShowEpisodeIntro();
+    _maybeShowIntro();
     _maybeShowBlockerTooltip();
   }
 
   void _quickSkipLevel() {
     if (!testMode) return;
-    if (mode == GameMode.campaign) {
-      if (levelIdx < 99) {
-        if (levelIdx + 2 > unlockedCampaign) unlockedCampaign = (levelIdx + 2).clamp(1, 100).toInt();
-        _startLevel(levelIdx + 1);
-      } else {
-        mode = GameMode.endless;
-        _startLevel(100);
-      }
-    } else {
-      _startLevel(levelIdx + 1);
-    }
+    _startLevel(levelIdx + 1);
     _saveProgress();
     setState(() {});
   }
@@ -856,9 +865,13 @@ void _startLevel(int idx, {bool hardReset = false}) {
 
   int _mergedValue(List<Pos> chain) {
     int s = 0;
-    for (final p in chain) s += grid[p.r][p.c].value;
+    for (final p in chain) {
+      s += grid[p.r][p.c].value;
+    }
     int pow = 1;
-    while (pow < max(2, s)) pow <<= 1;
+    while (pow < max(2, s)) {
+      pow <<= 1;
+    }
     return pow;
   }
 
@@ -1041,12 +1054,6 @@ void _startLevel(int idx, {bool hardReset = false}) {
       swaps += earned;
       await _submitLb();
 
-      if (mode == GameMode.campaign) {
-        if (levelIdx + 2 > unlockedCampaign) {
-          unlockedCampaign = (levelIdx + 2).clamp(1, 100).toInt();
-        }
-      }
-
       await _saveProgress();
       if (!mounted) return;
 
@@ -1058,17 +1065,7 @@ void _startLevel(int idx, {bool hardReset = false}) {
         await Future.delayed(const Duration(milliseconds: 280)); // tiny continue-delay
         if (!mounted) return;
 
-        if (mode == GameMode.campaign) {
-          if (levelIdx < 99) {
-            _startLevel(levelIdx + 1);
-          } else {
-            // Kampanya bitti -> endless
-            mode = GameMode.endless;
-            _startLevel(100);
-          }
-        } else {
-          _startLevel(levelIdx + 1);
-        }
+        _startLevel(levelIdx + 1);
 
         _rebuildValueColorMapFromGrid();
         await _saveProgress();
@@ -1102,17 +1099,17 @@ void _startLevel(int idx, {bool hardReset = false}) {
   // ---------- UI Text ----------
   String t(String key) {
     const tr = {
-      'title':'MERGE BLOCKS NEON CHAIN','level':'Bölüm','score':'Skor','best':'En iyi','max':'En büyük','target':'Hedef','move':'Hamle',
+      'title':' NEON CHAIN','level':'','score':'Skor','best':'En iyi','max':'En büyük','target':'','move':'Hamle',
       'mode':'Mod','campaign':'Kampanya','endless':'Sonsuz',
-      'episode':'Episode','goal':'Özel Hedef','unlocked':'Açık Bölüm',
+      'episode':'','goal':'Özel ','unlocked':'Açık ',
       'language':'Dil','numfmt':'Sayı','tr':'TR','en':'EN',
       'sfx':'Ses Efektleri','fx':'Performans','low':'Düşük FX','high':'Yüksek FX',
-      'test':'Test Modu'
+      'test':''
     };
     const en = {
-      'title':'MERGE BLOCKS NEON CHAIN','level':'Level','score':'Score','best':'Best','max':'Max','target':'Target','move':'Move',
+      'title':' NEON CHAIN','level':'Level','score':'Score','best':'Best','max':'Max','target':'Target','move':'Move',
       'mode':'Mode','campaign':'Campaign','endless':'Endless',
-      'episode':'Episode','goal':'Special Goal','unlocked':'Unlocked',
+      'episode':'','goal':'Special Goal','unlocked':'Unlocked',
       'language':'Language','numfmt':'Number','tr':'TR','en':'EN',
       'sfx':'Sound FX','fx':'Performance','low':'Low FX','high':'High FX',
       'test':'Test Mode'
@@ -1137,37 +1134,37 @@ void _startLevel(int idx, {bool hardReset = false}) {
     }
   }
 
-    Future<void> _maybeShowEpisodeIntro() async {
+    Future<void> _maybeShowIntro() async {
     // Her bölüm başlangıcında göster (test mode dahil) - PREMIUM / 2x süre
     final lvl = lv.index;
     final targetTxt = shortNumBig(lv.targetBig);
 
-    showEpisodeIntro = true;
+    showIntro = true;
 
-    // Faz 1: Bölüm
+    // Faz 1: 
     episodeIntroTitle = (lang == AppLang.tr) ? 'BÖLÜM $lvl' : 'LEVEL $lvl';
     episodeIntroRule = (lang == AppLang.tr) ? 'Hazır mısın?' : 'Are you ready?';
     if (mounted) setState(() {});
     await Future.delayed(const Duration(milliseconds: 2000)); // ~2x
 
-    if (!mounted || !showEpisodeIntro) return;
+    if (!mounted || !showIntro) return;
 
-    // Faz 2: Hedef
+    // Faz 2: 
     episodeIntroTitle = (lang == AppLang.tr) ? 'HEDEF' : 'TARGET';
     episodeIntroRule = targetTxt;
     if (mounted) setState(() {});
     await Future.delayed(const Duration(milliseconds: 2600)); // ~2x
 
-    if (!mounted || !showEpisodeIntro) return;
+    if (!mounted || !showIntro) return;
 
-    // Faz 3: Episode + kural
+    // Faz 3:  + kural
     episodeIntroTitle = 'EPISODE: ${lv.episodeName.toUpperCase()}';
     episodeIntroRule = _episodeRuleText(lv);
     if (mounted) setState(() {});
     await Future.delayed(const Duration(milliseconds: 2600)); // ~2x
 
     if (!mounted) return;
-    showEpisodeIntro = false;
+    showIntro = false;
     if (mounted) setState(() {});
   }
 
@@ -1184,16 +1181,6 @@ void _startLevel(int idx, {bool hardReset = false}) {
     await p.setBool(_kBlockerTipSeen, true);
   }
 
-  String _goalText() {
-    switch (lv.goalType) {
-      case GoalType.reachValue:
-        return lang == AppLang.tr ? 'Hedefe ulaş' : 'Reach target';
-      case GoalType.clearBlockers:
-        return lang == AppLang.tr ? 'Engeller: $blockersRemaining' : 'Blockers: $blockersRemaining';
-      case GoalType.comboCount:
-        return lang == AppLang.tr ? 'Combo ${lv.goalAmount}+ (şu an $bestComboThisLevel)' : 'Combo ${lv.goalAmount}+ (now $bestComboThisLevel)';
-    }
-  }
 
   // Küsuratsız kısa sayı
   String shortNumBig(BigInt n) {
@@ -1247,43 +1234,19 @@ void _startLevel(int idx, {bool hardReset = false}) {
         ],
       );
 
-  Widget _chip(String txt, {Color color = const Color(0xFF39FF14)}) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xFF21193C),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withOpacity( 0.58)),
-          boxShadow: [BoxShadow(color: color.withOpacity( 0.25), blurRadius: 8)],
-        ),
-        child: Text(txt, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 13)),
-      );
-
-  bool _isFallTarget(int r, int c) {
-    for (final t in fallingTiles) {
-      if (t.toR == r && t.c == c) return true;
-    }
-    return false;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final topBig = _maxTileBig();
-    final target = lv.targetBig;
-    final p = (topBig == BigInt.zero)
-        ? 0.0
-        : (topBig.toDouble() / target.toDouble()).clamp(0.0, 1.0);
-
     return Scaffold(
       backgroundColor: const Color(0xFF0B0A16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF17132C),
-        title: Text('${t('title')} • ${t('mode')}: ${mode == GameMode.campaign ? t('campaign') : t('endless')}',
+        title: Text('${t('title')} • ${t('mode')}: ${t('endless')}',
             style: _neon(const Color(0xFF39FF14), 18)),
         centerTitle: true,
         actions: [
           if (testMode)
             IconButton(
-              tooltip: 'Quick Skip',
+              tooltip: '',
               onPressed: _quickSkipLevel,
               icon: const Icon(Icons.skip_next),
             ),
@@ -1306,7 +1269,7 @@ void _startLevel(int idx, {bool hardReset = false}) {
                 if (v == 'auto_next') autoNextOn = !autoNextOn;
                 if (v == 'test') testMode = !testMode;
                 if (v == 'mode_campaign') {
-                  mode = GameMode.campaign;
+                  mode = GameMode.endless;
                   levelIdx = (unlockedCampaign - 1).clamp(0, 99);
                   _startLevel(levelIdx);
                   _rebuildValueColorMapFromGrid();
@@ -1320,21 +1283,9 @@ void _startLevel(int idx, {bool hardReset = false}) {
               });
               await _saveProgress();
             },
-            itemBuilder: (_) => [
-              PopupMenuItem(value: 'mode_campaign', child: Text('${t('mode')}: ${t('campaign')}')),
-              PopupMenuItem(value: 'mode_endless', child: Text('${t('mode')}: ${t('endless')}')),
-              const PopupMenuDivider(),
-              PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
-              PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),
-              PopupMenuItem(value: 'num_tr', child: Text('${t('numfmt')}: TR')),
-              PopupMenuItem(value: 'num_en', child: Text('${t('numfmt')}: EN')),
-              PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
+            itemBuilder: (_) => [              PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
               PopupMenuItem(value: 'fx_high', child: Text('${t('fx')}: ${t('high')}')),
-              PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),
-              PopupMenuItem(value: 'auto_next', child: Text('Auto Next: ${autoNextOn ? "ON" : "OFF"}')),
-              PopupMenuItem(value: 'test', child: Text('${t('test')}: ${testMode ? "ON" : "OFF"}')),
-              if (testMode) const PopupMenuItem(value: 'quick_skip', child: Text('Quick Skip')),
-            ],
+              PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),            ],
           ),
           IconButton(onPressed: () => _startLevel(levelIdx), icon: const Icon(Icons.replay)),
         ],
@@ -1344,35 +1295,14 @@ void _startLevel(int idx, {bool hardReset = false}) {
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
           child: Column(
             children: [
-              Wrap(spacing: 6, runSpacing: 6, children: [
-                _chip('${t('level')}: ${lv.index}'),
-                if (mode == GameMode.campaign) _chip('${t('unlocked')}: $unlockedCampaign', color: const Color(0xFFB388FF)),
-                _chip('${t('score')}: $score'),
-                _chip('${t('best')}: $best'),
-                _chip('${t('max')}: ${shortNumBig(topBig)}'),
-                _chip('${t('target')}: ${shortNumBig(target)}', color: const Color(0xFFFF4DFF)),
-                _chip('${t('move')}: $moves/${lv.move1}', color: const Color(0xFF39FF14)),
-                _chip('↔ $swaps', color: const Color(0xFF40C4FF)),
-                _chip('${t('episode')}: ${lv.episodeName}', color: const Color(0xFFFFD740)),
-                _chip('${t('goal')}: ${_goalText()}', color: const Color(0xFF64FFDA)),
-                if (testMode) _chip('TEST', color: const Color(0xFFFF5252)),
-              ]),
+              const SizedBox.shrink(),
               const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: LinearProgressIndicator(
-                  value: p,
-                  minHeight: 8,
-                  backgroundColor: const Color(0xFF2D2450),
-                  color: const Color(0xFF39FF14),
-                ),
-              ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, c) {
-                    const toolW = 88.0;
-                    final usableW = max(190.0, c.maxWidth - toolW * 2 - 2);
+                    const toolW = 120.0;
+                    final usableW = max(120.0, c.maxWidth - toolW * 2 - 8);
                     final usableH = c.maxHeight;
                     final ratio = rows / cols;
 
@@ -1419,10 +1349,6 @@ void _startLevel(int idx, {bool hardReset = false}) {
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-        _logoCard('MERGE BLOCKS', mode == GameMode.campaign ? 'CAMP' : 'ENDL'),
-        const SizedBox(height: 6),
-        _logoCard('NEON', 'GRID'),
-        const SizedBox(height: 8),
         _sideBtn(
           icon: swapMode ? Icons.close : Icons.swap_horiz,
           label: '$swaps',
@@ -1530,34 +1456,6 @@ void _startLevel(int idx, {bool hardReset = false}) {
     );
   }
 
-  Widget _logoCard(String a, String b) {
-    return Container(
-      width: 50,
-      height: 96,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF2B2152), Color(0xFF171129)]),
-        border: Border.all(color: const Color(0xFF6A52D9), width: 1.2),
-        boxShadow: const [BoxShadow(color: Color(0x3300E5FF), blurRadius: 8)],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 1.0, vertical: 1.0),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(a, maxLines: 1, overflow: TextOverflow.visible, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Color(0xFF39FF14))),
-              const SizedBox(height: 1),
-              Text(b, maxLines: 1, overflow: TextOverflow.visible, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: Color(0xFFFF4DFF))),
-              const SizedBox(height: 4),
-              const Icon(Icons.auto_awesome, size: 14, color: Color(0xFF00E5FF)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _sideBtn({required IconData icon, required String label, VoidCallback? onTap}) {
     return Material(
@@ -1584,6 +1482,14 @@ void _startLevel(int idx, {bool hardReset = false}) {
         ),
       ),
     );
+  }
+
+
+  bool _isFallTarget(int r, int c) {
+    for (final t in fallingTiles) {
+      if (t.toR == r && t.c == c) return true;
+    }
+    return false;
   }
 
   Widget _buildBoard(Size boardSize) {
@@ -1846,11 +1752,11 @@ if (_isLevelGoalCompleted() && mounted) {
                   ),
                 ),
               ),
-            if (showEpisodeIntro)
+            if (showIntro)
               Positioned.fill(
                 child: GestureDetector(
                   onTap: () {
-                    showEpisodeIntro = false;
+                    showIntro = false;
                     setState(() {});
                   },
                   child: Container(
@@ -1910,7 +1816,7 @@ if (_isLevelGoalCompleted() && mounted) {
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w900,
-                                    fontSize: 18,
+                                    fontSize: 24,
                                     letterSpacing: 0.2,
                                   ),
                                   textAlign: TextAlign.center,
@@ -1951,7 +1857,8 @@ if (_isLevelGoalCompleted() && mounted) {
   }
 
   Widget _buildFixedGrid(Size boardSize) {
-    final innerW = boardSize.width - boardPadding * 2, innerH = boardSize.height - boardPadding * 2;
+        final int maxOnBoard = _maxTileBig().toInt();
+final innerW = boardSize.width - boardPadding * 2, innerH = boardSize.height - boardPadding * 2;
     final cw = (innerW - cellGap * (cols - 1)) / cols, ch = (innerH - cellGap * (rows - 1)) / rows;
     final children = <Widget>[];
 
@@ -2035,14 +1942,25 @@ if (_isLevelGoalCompleted() && mounted) {
                           )
                         : cell.frozen
                             ? const Icon(Icons.ac_unit, color: Colors.white, size: 17)
-                            : Text(
-                                shortNumInt(cell.value),
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.white,
-                                  fontSize: cell.value >= 1000000 ? 11.8 : (cell.value >= 10000 ? 14 : 17),
-                                  shadows: const [Shadow(color: Colors.black54, blurRadius: 3)],
-                                ),
+                            : Stack(
+                                clipBehavior: Clip.none,
+                                alignment: Alignment.center,
+                                children: [
+                                  Text(
+                                    shortNumInt(cell.value),
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                      color: Colors.white,
+                                      fontSize: cell.value >= 1000000 ? 14 : (cell.value >= 10000 ? 17 : 21),
+                                      shadows: const [Shadow(color: Colors.black54, blurRadius: 5)],
+                                    ),
+                                  ),
+                                  if (maxOnBoard >= 2048 && cell.value == maxOnBoard)
+                                    const Positioned(
+                                      top: -12,
+                                      child: Text('👑', style: TextStyle(fontSize: 26)),
+                                    ),
+                                ],
                               ),
                   ),
                 ],
@@ -2219,10 +2137,10 @@ class FallingPainter extends CustomPainter {
       canvas.drawRRect(rr, fill);
 
       if (tile.blocked) {
-        final tp = TextPainter(text: const TextSpan(text: '🔒', style: TextStyle(fontSize: 16)), textDirection: TextDirection.ltr)..layout();
+        final tp = TextPainter(text: const TextSpan(text: '🔒', style: TextStyle(fontSize: 20)), textDirection: TextDirection.ltr)..layout();
         tp.paint(canvas, Offset(x - tp.width / 2, y - tp.height / 2));
       } else if (tile.frozen) {
-        final tp = TextPainter(text: const TextSpan(text: '❄', style: TextStyle(fontSize: 16, color: Colors.white)), textDirection: TextDirection.ltr)..layout();
+        final tp = TextPainter(text: const TextSpan(text: '❄', style: TextStyle(fontSize: 20, color: Colors.white)), textDirection: TextDirection.ltr)..layout();
         tp.paint(canvas, Offset(x - tp.width / 2, y - tp.height / 2));
       } else {
         final tp = TextPainter(
