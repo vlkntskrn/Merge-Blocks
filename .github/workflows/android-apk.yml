@@ -1,12 +1,12 @@
-name: Build Android APK
+name: Android APK
 
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
 
 jobs:
-  build:
+  build-apk:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,11 +23,16 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.24.3"
+          channel: stable
+          cache: true
 
-      - name: Flutter pub get
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      - name: Install dependencies
         run: flutter pub get
 
-      - name: Build APK (release)
+      - name: Build release APK
         run: flutter build apk --release
 
       - name: Upload APK artifact
