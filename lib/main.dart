@@ -14,7 +14,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-
 class BlockerCrackPainter extends CustomPainter {
   final int hp;
   BlockerCrackPainter(this.hp);
@@ -24,7 +23,7 @@ class BlockerCrackPainter extends CustomPainter {
     final p = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = hp == 2 ? 1.8 : 2.2
-      ..color = Colors.black.withOpacity(hp == 2 ? 0.28 : 0.40)
+      ..color = Colors.black.withOpacity( hp == 2 ? 0.28 : 0.40)
       ..strokeCap = StrokeCap.round;
 
     if (hp >= 3) return;
@@ -48,7 +47,7 @@ class BlockerCrackPainter extends CustomPainter {
       final p2 = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.4
-        ..color = Colors.black.withOpacity(0.50)
+        ..color = Colors.black.withOpacity( 0.50)
         ..strokeCap = StrokeCap.round;
 
       final path2 = Path()
@@ -91,7 +90,7 @@ enum AppLang { tr, en }
 enum NumFmt { tr, en }
 enum FxMode { low, high }
 enum GoalType { reachValue, clearBlockers, comboCount }
-enum GameMode { endless }
+enum GameMode { campaign, endless }
 
 class Cell {
   int value;
@@ -247,7 +246,6 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     return _valuePalette[idx];
   }
 
-
   static const int rows = 8, cols = 5;
 
   // Blocker hit FX maps
@@ -325,7 +323,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   AppLang lang = AppLang.tr;
   NumFmt numFmt = NumFmt.tr;
   FxMode fxMode = FxMode.high;
-  GameMode mode = GameMode.endless;
+  GameMode mode = GameMode.campaign;
   bool sfxOn = true;
   bool testMode = false;
   bool autoNextOn = true;
@@ -560,6 +558,9 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
   LevelConfig get lv {
+    if (mode == GameMode.campaign) {
+      return campaignLevels[levelIdx.clamp(0, 99)];
+    }
     final logical = max(101, levelIdx + 1);
     return _generateEndlessLevel(logical);
   }
@@ -593,7 +594,8 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
       sfxOn = p.getBool(_kSfx) ?? true;
       fxMode = (p.getString(_kFx) ?? 'high') == 'low' ? FxMode.low : FxMode.high;
       testMode = p.getBool(_kTest) ?? false;
-      mode = GameMode.endless;
+      mode = (p.getString(_kMode) ?? 'campaign') == 'endless' ? GameMode.endless : GameMode.campaign;
+      if (mode == GameMode.campaign && levelIdx > 99) levelIdx = 99;
       if (mode == GameMode.endless && levelIdx < 100) levelIdx = 100;
     });
     _startLevel(levelIdx);
@@ -624,7 +626,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
         score: int.tryParse(s[1]) ?? 0,
         level: int.tryParse(s[2]) ?? 1,
         date: DateTime.tryParse(s[3]) ?? DateTime.now(),
-        mode: GameMode.endless,
+        mode: (s.length > 4 && s[4] == 'endless') ? GameMode.endless : GameMode.campaign,
       );
     }).toList();
   }
@@ -654,12 +656,12 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
 
   Future<void> _showLeaderboardDialog() async {
     final local = await _loadLocalLb();
-    final localCampaign = local.where((e) => e.mode == GameMode.endless).toList()
+    final localCampaign = local.where((e) => e.mode == GameMode.campaign).toList()
       ..sort((a, b) => b.score.compareTo(a.score));
     final localEndless = local.where((e) => e.mode == GameMode.endless).toList()
       ..sort((a, b) => b.score.compareTo(a.score));
 
-    final onlineCampaign = await onlineLb.fetchTop(mode: GameMode.endless, limit: 30);
+    final onlineCampaign = await onlineLb.fetchTop(mode: GameMode.campaign, limit: 30);
     final onlineEndless = await onlineLb.fetchTop(mode: GameMode.endless, limit: 30);
 
     if (!mounted) return;
@@ -739,7 +741,11 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
 void _startLevel(int idx, {bool hardReset = false}) {
-    levelIdx = max(100, idx).toInt();
+    if (mode == GameMode.campaign) {
+      levelIdx = idx.clamp(0, 99).toInt();
+    } else {
+      levelIdx = max(100, idx).toInt();
+    }
 
     if (hardReset) {
       score = 0;
@@ -798,7 +804,17 @@ void _startLevel(int idx, {bool hardReset = false}) {
 
   void _quickSkipLevel() {
     if (!testMode) return;
-    _startLevel(levelIdx + 1);
+    if (mode == GameMode.campaign) {
+      if (levelIdx < 99) {
+        if (levelIdx + 2 > unlockedCampaign) unlockedCampaign = (levelIdx + 2).clamp(1, 100).toInt();
+        _startLevel(levelIdx + 1);
+      } else {
+        mode = GameMode.endless;
+        _startLevel(100);
+      }
+    } else {
+      _startLevel(levelIdx + 1);
+    }
     _saveProgress();
     setState(() {});
   }
@@ -876,14 +892,39 @@ void _startLevel(int idx, {bool hardReset = false}) {
     return null;
   }
 
+  // DartPad/CI uyumlu piyano hissi (harici ses paketi yok)
   Future<void> _sfxLight() async {
     if (!sfxOn) return;
     await HapticFeedback.selectionClick();
+    await SystemSound.play(SystemSoundType.click);
+    await Future.delayed(const Duration(milliseconds: 24));
   }
 
-  Future<void> _sfxMerge() async {
+  Future<void> _playPianoPattern(List<int> gaps) async {
+    if (!sfxOn) return;
+    for (var i = 0; i < gaps.length; i++) {
+      await SystemSound.play(SystemSoundType.click);
+      final g = gaps[i];
+      if (g > 0) await Future.delayed(Duration(milliseconds: g));
+    }
+  }
+
+  Future<void> _sfxMerge(int mergedCount) async {
     if (!sfxOn) return;
     await HapticFeedback.mediumImpact();
+
+    final c = mergedCount.clamp(2, 8);
+    if (c <= 2) {
+      await _playPianoPattern([68, 0]);
+    } else if (c == 3) {
+      await _playPianoPattern([58, 58, 0]);
+    } else if (c == 4) {
+      await _playPianoPattern([52, 52, 66, 0]);
+    } else if (c == 5) {
+      await _playPianoPattern([46, 46, 52, 62, 0]);
+    } else {
+      await _playPianoPattern([42, 42, 46, 52, 58, 68, 0]);
+    }
   }
 
   Pos? _cellFromLocal(Offset local, Size boardSize) {
@@ -1023,6 +1064,12 @@ void _startLevel(int idx, {bool hardReset = false}) {
       swaps += earned;
       await _submitLb();
 
+      if (mode == GameMode.campaign) {
+        if (levelIdx + 2 > unlockedCampaign) {
+          unlockedCampaign = (levelIdx + 2).clamp(1, 100).toInt();
+        }
+      }
+
       await _saveProgress();
       if (!mounted) return;
 
@@ -1034,7 +1081,17 @@ void _startLevel(int idx, {bool hardReset = false}) {
         await Future.delayed(const Duration(milliseconds: 280)); // tiny continue-delay
         if (!mounted) return;
 
-        _startLevel(levelIdx + 1);
+        if (mode == GameMode.campaign) {
+          if (levelIdx < 99) {
+            _startLevel(levelIdx + 1);
+          } else {
+            // Kampanya bitti -> endless
+            mode = GameMode.endless;
+            _startLevel(100);
+          }
+        } else {
+          _startLevel(levelIdx + 1);
+        }
 
         _rebuildValueColorMapFromGrid();
         await _saveProgress();
@@ -1068,7 +1125,7 @@ void _startLevel(int idx, {bool hardReset = false}) {
   // ---------- UI Text ----------
   String t(String key) {
     const tr = {
-      'title':'MERGE BLOCKS NEON CHAIN','level':'Bölüm','score':'Skor','best':'En iyi','max':'En büyük','target':'Hedef','move':'Hamle',
+      'title':' NEON CHAIN','level':'Bölüm','score':'Skor','best':'En iyi','max':'En büyük','target':'Hedef','move':'Hamle',
       'mode':'Mod','campaign':'Kampanya','endless':'Sonsuz',
       'episode':'Episode','goal':'Özel Hedef','unlocked':'Açık Bölüm',
       'language':'Dil','numfmt':'Sayı','tr':'TR','en':'EN',
@@ -1076,7 +1133,7 @@ void _startLevel(int idx, {bool hardReset = false}) {
       'test':'Test Modu'
     };
     const en = {
-      'title':'MERGE BLOCKS NEON CHAIN','level':'Level','score':'Score','best':'Best','max':'Max','target':'Target','move':'Move',
+      'title':' NEON CHAIN','level':'Level','score':'Score','best':'Best','max':'Max','target':'Target','move':'Move',
       'mode':'Mode','campaign':'Campaign','endless':'Endless',
       'episode':'Episode','goal':'Special Goal','unlocked':'Unlocked',
       'language':'Language','numfmt':'Number','tr':'TR','en':'EN',
@@ -1085,7 +1142,6 @@ void _startLevel(int idx, {bool hardReset = false}) {
     };
     return (lang == AppLang.tr ? tr : en)[key] ?? key;
   }
-
 
   String _episodeRuleText(LevelConfig cfg) {
     if (lang == AppLang.tr) {
@@ -1150,7 +1206,6 @@ void _startLevel(int idx, {bool hardReset = false}) {
     await p.setBool(_kBlockerTipSeen, true);
   }
 
-
   // Küsuratsız kısa sayı
   String shortNumBig(BigInt n) {
     if (n < BigInt.from(1000)) return n.toString();
@@ -1198,8 +1253,8 @@ void _startLevel(int idx, {bool hardReset = false}) {
         fontSize: s,
         fontWeight: FontWeight.w900,
         shadows: [
-          Shadow(color: c.withOpacity(0.95), blurRadius: 10),
-          Shadow(color: c.withOpacity(0.45), blurRadius: 22),
+          Shadow(color: c.withOpacity( 0.95), blurRadius: 10),
+          Shadow(color: c.withOpacity( 0.45), blurRadius: 22),
         ],
       );
 
@@ -1208,8 +1263,8 @@ void _startLevel(int idx, {bool hardReset = false}) {
         decoration: BoxDecoration(
           color: const Color(0xFF21193C),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withOpacity(0.58)),
-          boxShadow: [BoxShadow(color: color.withOpacity(0.25), blurRadius: 8)],
+          border: Border.all(color: color.withOpacity( 0.58)),
+          boxShadow: [BoxShadow(color: color.withOpacity( 0.25), blurRadius: 8)],
         ),
         child: Text(txt, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 13)),
       );
@@ -1223,18 +1278,12 @@ void _startLevel(int idx, {bool hardReset = false}) {
 
   @override
   Widget build(BuildContext context) {
-    final topBig = _maxTileBig();
-    final target = lv.targetBig;
-    final p = (topBig == BigInt.zero)
-        ? 0.0
-        : (topBig.toDouble() / target.toDouble()).clamp(0.0, 1.0);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0B0A16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF17132C),
-        title: Text('${t('title')} • ${t('mode')}: ${t('endless')}',
-            style: _neon(const Color(0xFF39FF14), 18)),
+        title: const Text(''),
         centerTitle: true,
         actions: [
           if (testMode)
@@ -1253,43 +1302,15 @@ void _startLevel(int idx, {bool hardReset = false}) {
               }
               setState(() {
                 if (v == 'lang_tr') lang = AppLang.tr;
-                if (v == 'lang_en') lang = AppLang.en;
-                if (v == 'num_tr') numFmt = NumFmt.tr;
-                if (v == 'num_en') numFmt = NumFmt.en;
-                if (v == 'sfx') sfxOn = !sfxOn;
+                if (v == 'lang_en') lang = AppLang.en;                if (v == 'sfx') sfxOn = !sfxOn;
                 if (v == 'fx_low') fxMode = FxMode.low;
-                if (v == 'fx_high') fxMode = FxMode.high;
-                if (v == 'auto_next') autoNextOn = !autoNextOn;
-                if (v == 'test') testMode = !testMode;
-                if (v == 'mode_campaign') {
-                  mode = GameMode.endless;
-                  levelIdx = (unlockedCampaign - 1).clamp(0, 99);
-                  _startLevel(levelIdx);
-                  _rebuildValueColorMapFromGrid();
-                }
-                if (v == 'mode_endless') {
-                  mode = GameMode.endless;
-                  if (levelIdx < 100) levelIdx = 100;
-                  _startLevel(levelIdx);
-                  _rebuildValueColorMapFromGrid();
-                }
-              });
+                if (v == 'fx_high') fxMode = FxMode.high;              });
               await _saveProgress();
             },
-            itemBuilder: (_) => [
-              PopupMenuItem(value: 'mode_campaign', child: Text('${t('mode')}: ${t('campaign')}')),
-              PopupMenuItem(value: 'mode_endless', child: Text('${t('mode')}: ${t('endless')}')),
-              const PopupMenuDivider(),
-              PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
-              PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),
-              PopupMenuItem(value: 'num_tr', child: Text('${t('numfmt')}: TR')),
-              PopupMenuItem(value: 'num_en', child: Text('${t('numfmt')}: EN')),
-              PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
+            itemBuilder: (_) => [              PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
+              PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),              PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
               PopupMenuItem(value: 'fx_high', child: Text('${t('fx')}: ${t('high')}')),
-              PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),
-              PopupMenuItem(value: 'auto_next', child: Text('Auto Next: ${autoNextOn ? "ON" : "OFF"}')),
-              PopupMenuItem(value: 'test', child: Text('${t('test')}: ${testMode ? "ON" : "OFF"}')),
-              if (testMode) const PopupMenuItem(value: 'quick_skip', child: Text('Quick Skip')),
+              PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),              if (testMode) const PopupMenuItem(value: 'quick_skip', child: Text('Quick Skip')),
             ],
           ),
           IconButton(onPressed: () => _startLevel(levelIdx), icon: const Icon(Icons.replay)),
@@ -1301,9 +1322,8 @@ void _startLevel(int idx, {bool hardReset = false}) {
           child: Column(
             children: [
               Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                alignment: WrapAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   _chip('${t('level')}: ${lv.index}'),
                   _chip('${t('score')}: $score'),
@@ -1311,23 +1331,12 @@ void _startLevel(int idx, {bool hardReset = false}) {
                 ],
               ),
               const SizedBox(height: 8),
-              _topBanner(),
-              const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: LinearProgressIndicator(
-                  value: p,
-                  minHeight: 8,
-                  backgroundColor: const Color(0xFF2D2450),
-                  color: const Color(0xFF39FF14),
-                ),
-              ),
-              const SizedBox(height: 6),
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, c) {
-                    final usableW = c.maxWidth;
-                    final usableH = c.maxHeight - 8;
+                    const toolW = 88.0;
+                    final usableW = max(190.0, c.maxWidth - toolW * 2 - 2);
+                    final usableH = c.maxHeight;
                     final ratio = rows / cols;
 
                     double boardW = usableW;
@@ -1340,13 +1349,24 @@ void _startLevel(int idx, {bool hardReset = false}) {
 
                     return Column(
                       children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _sideBtn(icon: Icons.swap_horiz_rounded, label: 'KAYDIR', onTap: () async { if (!isBusy) setState(() { swapMode = !swapMode; swapFirst = null; }); }),
+                            const SizedBox(width: 8),
+                            _sideBtn(icon: Icons.play_circle_fill_rounded, label: '+1', onTap: () async { if (isBusy) return; final ready = await adService.isAdReady(); if (!ready) await adService.loadAd(); await adService.showAd(onReward: () { setState(() => swaps++); _saveProgress(); }); }),
+                            const SizedBox(width: 8),
+                            _sideBtn(icon: Icons.emoji_events_rounded, label: 'TOP', onTap: _showLeaderboardDialog),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
                         Expanded(
                           child: Center(
                             child: SizedBox(width: boardW, height: boardH, child: _buildBoard(boardSize)),
                           ),
                         ),
                         const SizedBox(height: 6),
-                        _bottomActionsBar(),
+                        _bottomAdBanner(),
                       ],
                     );
                   },
@@ -1359,56 +1379,42 @@ void _startLevel(int idx, {bool hardReset = false}) {
     );
   }
 
-
-  Widget _topBanner() {
+  Widget _bottomAdBanner() {
     return Container(
-      width: double.infinity,
-      height: 42,
+      height: 38,
+      margin: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        gradient: const LinearGradient(colors: [Color(0xFF1A1440), Color(0xFF102D55)]),
-        border: Border.all(color: const Color(0xFF40C4FF), width: 1.2),
+        color: const Color(0xFF15112A),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF4B3F7F)),
       ),
-      child: const Center(
-        child: Text('REKLAM BANNER', style: TextStyle(color: Color(0xFF7DF9FF), fontWeight: FontWeight.bold)),
-      ),
+      alignment: Alignment.center,
+      child: Text(lang == AppLang.tr ? 'Reklam Banner' : 'Ad Banner', style: const TextStyle(fontSize: 11, color: Color(0xFFB0BEC5), fontWeight: FontWeight.w700)),
     );
   }
 
-  Widget _bottomActionsBar() {
-    return Row(
-      children: [
-        Expanded(child: _premiumActionBtn(icon: swapMode ? Icons.close : Icons.swap_horiz, label: 'Kaydır ($swaps)', onTap: (swaps > 0 && !isBusy) ? () { setState(() { swapMode = !swapMode; if (!swapMode) swapFirst = null;}); _saveProgress(); } : null)),
-        const SizedBox(width: 10),
-        Expanded(child: _premiumActionBtn(icon: Icons.play_circle_fill, label: 'Reklam İzle +1', onTap: !isBusy ? () async { final ready = await adService.isAdReady(); if (!ready) await adService.loadAd(); await adService.showAd(onReward: () { setState(() => swaps++); _saveProgress();}); } : null)),
-        const SizedBox(width: 10),
-        Expanded(child: _premiumActionBtn(icon: Icons.emoji_events, label: 'Top Skor', onTap: _showLeaderboardDialog)),
-      ],
-    );
-  }
-
-  Widget _premiumActionBtn({required IconData icon, required String label, required VoidCallback? onTap}) {
+  Widget _sideBtn({required IconData icon, required String label, VoidCallback? onTap}) {
     return Material(
-      color: Colors.transparent,
+      color: const Color(0xFF231B42),
+      borderRadius: BorderRadius.circular(14),
       child: InkWell(
+        borderRadius: BorderRadius.circular(14),
         onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Ink(
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+        child: Container(
+          width: 48,
+          height: 56,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            gradient: const LinearGradient(colors: [Color(0xFF3E2D8F), Color(0xFF0088CC)]),
-            boxShadow: const [
-              BoxShadow(color: Color(0x6600E5FF), blurRadius: 10, offset: Offset(0, 4)),
-              BoxShadow(color: Color(0x332A1A6F), blurRadius: 2, offset: Offset(0, -1)),
-            ],
-            border: Border.all(color: const Color(0xFF7DF9FF), width: 1.2),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFF6A52D9), width: 1.2),
+            boxShadow: const [BoxShadow(color: Color(0x3300E5FF), blurRadius: 8)],
           ),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, color: Colors.white, size: 28),
-            const SizedBox(height: 6),
-            Text(label, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
-          ]),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 22, color: Colors.white),
+              if (label.isNotEmpty) Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800)),
+            ],
+          ),
         ),
       ),
     );
@@ -1543,7 +1549,7 @@ if (_isLevelGoalCompleted() && mounted) {
         score += merged + path.length * 18;
         if (score > best) best = score;
 
-        await _sfxMerge();
+        await _sfxMerge(path.length);
         _spawnComboParticles(_cellCenter(target, boardSize), path.length);
         await _applyGravityAndRefill();
         _rebuildValueColorMapFromGrid();
@@ -1689,7 +1695,7 @@ if (_isLevelGoalCompleted() && mounted) {
                         colors: [
                           const Color(0xCC1A1240),
                           const Color(0xE60E0A22),
-                          Colors.black.withOpacity(0.88),
+                          Colors.black.withOpacity( 0.88),
                         ],
                       ),
                     ),
@@ -1829,13 +1835,13 @@ if (_isLevelGoalCompleted() && mounted) {
                   width: sw ? 3 : (sel ? 2 : 1),
                 ),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 7, offset: const Offset(0, 3)),
-                  if (sel) BoxShadow(color: Colors.white.withOpacity(glowAnim.value), blurRadius: 8),
+                  BoxShadow(color: Colors.black.withOpacity( 0.35), blurRadius: 7, offset: const Offset(0, 3)),
+                  if (sel) BoxShadow(color: Colors.white.withOpacity( glowAnim.value), blurRadius: 8),
                 ],
               ),
               child: Stack(
                 children: [
-                  Positioned(left: 5, right: 5, top: 4, child: Container(height: 8, decoration: BoxDecoration(color: Colors.white.withOpacity(0.22), borderRadius: BorderRadius.circular(8)))),
+                  Positioned(left: 5, right: 5, top: 4, child: Container(height: 8, decoration: BoxDecoration(color: Colors.white.withOpacity( 0.22), borderRadius: BorderRadius.circular(8)))),
                   Center(
                     child: cell.blocked
                         ? Transform.scale(
@@ -1857,7 +1863,7 @@ if (_isLevelGoalCompleted() && mounted) {
                             ),
                           ),
 
-                                  Icon(Icons.lock, color: Colors.white.withOpacity(0.95), size: 16),
+                                  Icon(Icons.lock, color: Colors.white.withOpacity( 0.95), size: 16),
                                   Text('HP ${cell.blockerHp}', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900)),
                                 ]),
                           )
@@ -1923,14 +1929,14 @@ class PathPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = lowFx ? 6 : 10
         ..strokeCap = StrokeCap.round
-        ..shader = LinearGradient(colors: [dark.withOpacity(0.9), dark]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)));
+        ..shader = LinearGradient(colors: [dark.withOpacity( 0.9), dark]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)));
 
       if (!lowFx) {
         final glowPaint = Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 16
           ..strokeCap = StrokeCap.round
-          ..shader = LinearGradient(colors: [dark.withOpacity(0.55), dark.withOpacity(0.95)]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)))
+          ..shader = LinearGradient(colors: [dark.withOpacity( 0.55), dark.withOpacity( 0.95)]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)))
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
         canvas.drawLine(Offset(x1, y1), Offset(x2, y2), glowPaint);
       }
@@ -1941,17 +1947,17 @@ class PathPainter extends CustomPainter {
         final local = (energyPhase + i * 0.17) % 1.0;
         final ex = x1 + (x2 - x1) * local;
         final ey = y1 + (y2 - y1) * local;
-        final eColor = Color.lerp(Colors.white, const Color(0xFF00E5FF), t)!.withOpacity(0.95);
+        final eColor = Color.lerp(Colors.white, const Color(0xFF00E5FF), t)!.withOpacity( 0.95);
         final ePaint = Paint()..color = eColor..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
         canvas.drawCircle(Offset(ex, ey), 6.0, ePaint);
-        canvas.drawCircle(Offset(ex, ey), 2.6, Paint()..color = Colors.white.withOpacity(0.95));
+        canvas.drawCircle(Offset(ex, ey), 2.6, Paint()..color = Colors.white.withOpacity( 0.95));
       }
 
       final shine = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = lowFx ? 2 : 4
         ..strokeCap = StrokeCap.round
-        ..color = Colors.white.withOpacity((0.42 - 0.18 * t + glow * 0.15).clamp(0.12, 0.58));
+        ..color = Colors.white.withOpacity( (0.42 - 0.18 * t + glow * 0.15).clamp(0.12, 0.58));
       canvas.drawLine(Offset(x1, y1), Offset(x2, y2), shine);
     }
   }
@@ -1977,7 +1983,7 @@ class PopPainter extends CustomPainter {
     for (final c in cells) {
       final cx = boardPadding + c.c * (cw + gap) + cw / 2, cy = boardPadding + c.r * (ch + gap) + ch / 2;
       final rect = Rect.fromCenter(center: Offset(cx, cy), width: cw * scale, height: ch * scale);
-      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(12)), Paint()..color = Colors.white.withOpacity(0.65 * alpha));
+      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(12)), Paint()..color = Colors.white.withOpacity( 0.65 * alpha));
     }
   }
 
@@ -1994,7 +2000,7 @@ class ParticlesPainter extends CustomPainter {
     for (final p in particles) {
       final dx = cos(p.angle) * p.speed * t, dy = sin(p.angle) * p.speed * t;
       final pos = Offset(p.origin.dx + dx, p.origin.dy + dy);
-      canvas.drawCircle(pos, 1.7 + (1 - t) * 2.0, Paint()..color = p.color.withOpacity((1 - t).clamp(0.0, 1.0)));
+      canvas.drawCircle(pos, 1.7 + (1 - t) * 2.0, Paint()..color = p.color.withOpacity( (1 - t).clamp(0.0, 1.0)));
     }
   }
   @override
