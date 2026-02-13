@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+
 class BlockerCrackPainter extends CustomPainter {
   final int hp;
   BlockerCrackPainter(this.hp);
@@ -23,7 +24,7 @@ class BlockerCrackPainter extends CustomPainter {
     final p = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = hp == 2 ? 1.8 : 2.2
-      ..color = Colors.black.withOpacity( hp == 2 ? 0.28 : 0.40)
+      ..color = Colors.black.withOpacity(hp == 2 ? 0.28 : 0.40)
       ..strokeCap = StrokeCap.round;
 
     if (hp >= 3) return;
@@ -47,7 +48,7 @@ class BlockerCrackPainter extends CustomPainter {
       final p2 = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.4
-        ..color = Colors.black.withOpacity( 0.50)
+        ..color = Colors.black.withOpacity(0.50)
         ..strokeCap = StrokeCap.round;
 
       final path2 = Path()
@@ -246,6 +247,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     return _valuePalette[idx];
   }
 
+
   static const int rows = 8, cols = 5;
 
   // Blocker hit FX maps
@@ -308,7 +310,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   final RewardedAdService adService = MockRewardedAdService();
   final OnlineLeaderboardService onlineLb = MockOnlineLeaderboardService();
 
-  late List<List<Cell>> grid;
+  List<List<Cell>> grid = List.generate(8, (_) => List.generate(5, (_) => Cell(0)));
   late final List<LevelConfig> campaignLevels;
 
   int levelIdx = 0; // campaign index 0..99, endless logical >99
@@ -575,10 +577,26 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     return BigInt.from(m);
   }
 
+
+  int _currentMaxValueOnBoard() {
+    int m = 0;
+    for (final row in grid) {
+      for (final c in row) {
+        if (c.value > m) m = c.value;
+      }
+    }
+    return m;
+  }
+
   List<int> _spawnPoolForLevel(int logicalLevel) {
-    // min seed level based
-    final startPow = min(1 + (logicalLevel - 1), 24);
-    return List.generate(5, (i) => 1 << (startPow + i));
+    final maxSeen = _currentMaxValueOnBoard();
+    int minSpawn = 2;
+    if (maxSeen >= 2048) {
+      final k = ((log(maxSeen) / ln2).floor() - 10).clamp(1, 6);
+      minSpawn = 1 << k;
+    }
+    const base = <int>[2, 4, 8, 16, 32, 64, 128];
+    return base.where((v) => v >= minSpawn).toList();
   }
 
   // ---------- Persistence ----------
@@ -892,39 +910,14 @@ void _startLevel(int idx, {bool hardReset = false}) {
     return null;
   }
 
-  // DartPad/CI uyumlu piyano hissi (harici ses paketi yok)
   Future<void> _sfxLight() async {
     if (!sfxOn) return;
     await HapticFeedback.selectionClick();
-    await SystemSound.play(SystemSoundType.click);
-    await Future.delayed(const Duration(milliseconds: 24));
   }
 
-  Future<void> _playPianoPattern(List<int> gaps) async {
-    if (!sfxOn) return;
-    for (var i = 0; i < gaps.length; i++) {
-      await SystemSound.play(SystemSoundType.click);
-      final g = gaps[i];
-      if (g > 0) await Future.delayed(Duration(milliseconds: g));
-    }
-  }
-
-  Future<void> _sfxMerge(int mergedCount) async {
+  Future<void> _sfxMerge() async {
     if (!sfxOn) return;
     await HapticFeedback.mediumImpact();
-
-    final c = mergedCount.clamp(2, 8);
-    if (c <= 2) {
-      await _playPianoPattern([68, 0]);
-    } else if (c == 3) {
-      await _playPianoPattern([58, 58, 0]);
-    } else if (c == 4) {
-      await _playPianoPattern([52, 52, 66, 0]);
-    } else if (c == 5) {
-      await _playPianoPattern([46, 46, 52, 62, 0]);
-    } else {
-      await _playPianoPattern([42, 42, 46, 52, 58, 68, 0]);
-    }
   }
 
   Pos? _cellFromLocal(Offset local, Size boardSize) {
@@ -1125,7 +1118,7 @@ void _startLevel(int idx, {bool hardReset = false}) {
   // ---------- UI Text ----------
   String t(String key) {
     const tr = {
-      'title':' NEON CHAIN','level':'Bölüm','score':'Skor','best':'En iyi','max':'En büyük','target':'Hedef','move':'Hamle',
+      'title':'MERGE BLOCKS NEON CHAIN','level':'Bölüm','score':'Skor','best':'En iyi','max':'En büyük','target':'Hedef','move':'Hamle',
       'mode':'Mod','campaign':'Kampanya','endless':'Sonsuz',
       'episode':'Episode','goal':'Özel Hedef','unlocked':'Açık Bölüm',
       'language':'Dil','numfmt':'Sayı','tr':'TR','en':'EN',
@@ -1133,7 +1126,7 @@ void _startLevel(int idx, {bool hardReset = false}) {
       'test':'Test Modu'
     };
     const en = {
-      'title':' NEON CHAIN','level':'Level','score':'Score','best':'Best','max':'Max','target':'Target','move':'Move',
+      'title':'MERGE BLOCKS NEON CHAIN','level':'Level','score':'Score','best':'Best','max':'Max','target':'Target','move':'Move',
       'mode':'Mode','campaign':'Campaign','endless':'Endless',
       'episode':'Episode','goal':'Special Goal','unlocked':'Unlocked',
       'language':'Language','numfmt':'Number','tr':'TR','en':'EN',
@@ -1142,6 +1135,7 @@ void _startLevel(int idx, {bool hardReset = false}) {
     };
     return (lang == AppLang.tr ? tr : en)[key] ?? key;
   }
+
 
   String _episodeRuleText(LevelConfig cfg) {
     if (lang == AppLang.tr) {
@@ -1206,6 +1200,17 @@ void _startLevel(int idx, {bool hardReset = false}) {
     await p.setBool(_kBlockerTipSeen, true);
   }
 
+  String _goalText() {
+    switch (lv.goalType) {
+      case GoalType.reachValue:
+        return lang == AppLang.tr ? 'Hedefe ulaş' : 'Reach target';
+      case GoalType.clearBlockers:
+        return lang == AppLang.tr ? 'Engeller: $blockersRemaining' : 'Blockers: $blockersRemaining';
+      case GoalType.comboCount:
+        return lang == AppLang.tr ? 'Combo ${lv.goalAmount}+ (şu an $bestComboThisLevel)' : 'Combo ${lv.goalAmount}+ (now $bestComboThisLevel)';
+    }
+  }
+
   // Küsuratsız kısa sayı
   String shortNumBig(BigInt n) {
     if (n < BigInt.from(1000)) return n.toString();
@@ -1253,8 +1258,8 @@ void _startLevel(int idx, {bool hardReset = false}) {
         fontSize: s,
         fontWeight: FontWeight.w900,
         shadows: [
-          Shadow(color: c.withOpacity( 0.95), blurRadius: 10),
-          Shadow(color: c.withOpacity( 0.45), blurRadius: 22),
+          Shadow(color: c.withOpacity(0.95), blurRadius: 10),
+          Shadow(color: c.withOpacity(0.45), blurRadius: 22),
         ],
       );
 
@@ -1263,10 +1268,10 @@ void _startLevel(int idx, {bool hardReset = false}) {
         decoration: BoxDecoration(
           color: const Color(0xFF21193C),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withOpacity( 0.58)),
-          boxShadow: [BoxShadow(color: color.withOpacity( 0.25), blurRadius: 8)],
+          border: Border.all(color: color.withOpacity(0.58)),
+          boxShadow: [BoxShadow(color: color.withOpacity(0.25), blurRadius: 8)],
         ),
-        child: Text(txt, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 13)),
+        child: Text(txt, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 11)),
       );
 
   bool _isFallTarget(int r, int c) {
@@ -1278,12 +1283,18 @@ void _startLevel(int idx, {bool hardReset = false}) {
 
   @override
   Widget build(BuildContext context) {
+    final topBig = _maxTileBig();
+    final target = lv.targetBig;
+    final p = (topBig == BigInt.zero)
+        ? 0.0
+        : (topBig.toDouble() / target.toDouble()).clamp(0.0, 1.0);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0B0A16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF17132C),
-        title: const Text(''),
+        title: Text('${t('title')} • ${t('mode')}: ${mode == GameMode.campaign ? t('campaign') : t('endless')}',
+            style: _neon(const Color(0xFF39FF14), 18)),
         centerTitle: true,
         actions: [
           if (testMode)
@@ -1302,15 +1313,43 @@ void _startLevel(int idx, {bool hardReset = false}) {
               }
               setState(() {
                 if (v == 'lang_tr') lang = AppLang.tr;
-                if (v == 'lang_en') lang = AppLang.en;                if (v == 'sfx') sfxOn = !sfxOn;
+                if (v == 'lang_en') lang = AppLang.en;
+                if (v == 'num_tr') numFmt = NumFmt.tr;
+                if (v == 'num_en') numFmt = NumFmt.en;
+                if (v == 'sfx') sfxOn = !sfxOn;
                 if (v == 'fx_low') fxMode = FxMode.low;
-                if (v == 'fx_high') fxMode = FxMode.high;              });
+                if (v == 'fx_high') fxMode = FxMode.high;
+                if (v == 'auto_next') autoNextOn = !autoNextOn;
+                if (v == 'test') testMode = !testMode;
+                if (v == 'mode_campaign') {
+                  mode = GameMode.campaign;
+                  levelIdx = (unlockedCampaign - 1).clamp(0, 99);
+                  _startLevel(levelIdx);
+                  _rebuildValueColorMapFromGrid();
+                }
+                if (v == 'mode_endless') {
+                  mode = GameMode.endless;
+                  if (levelIdx < 100) levelIdx = 100;
+                  _startLevel(levelIdx);
+                  _rebuildValueColorMapFromGrid();
+                }
+              });
               await _saveProgress();
             },
-            itemBuilder: (_) => [              PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
-              PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),              PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'mode_campaign', child: Text('${t('mode')}: ${t('campaign')}')),
+              PopupMenuItem(value: 'mode_endless', child: Text('${t('mode')}: ${t('endless')}')),
+              const PopupMenuDivider(),
+              PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
+              PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),
+              PopupMenuItem(value: 'num_tr', child: Text('${t('numfmt')}: TR')),
+              PopupMenuItem(value: 'num_en', child: Text('${t('numfmt')}: EN')),
+              PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
               PopupMenuItem(value: 'fx_high', child: Text('${t('fx')}: ${t('high')}')),
-              PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),              if (testMode) const PopupMenuItem(value: 'quick_skip', child: Text('Quick Skip')),
+              PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),
+              PopupMenuItem(value: 'auto_next', child: Text('Auto Next: ${autoNextOn ? "ON" : "OFF"}')),
+              PopupMenuItem(value: 'test', child: Text('${t('test')}: ${testMode ? "ON" : "OFF"}')),
+              if (testMode) const PopupMenuItem(value: 'quick_skip', child: Text('Quick Skip')),
             ],
           ),
           IconButton(onPressed: () => _startLevel(levelIdx), icon: const Icon(Icons.replay)),
@@ -1321,22 +1360,36 @@ void _startLevel(int idx, {bool hardReset = false}) {
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
           child: Column(
             children: [
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _chip('${t('level')}: ${lv.index}'),
-                  _chip('${t('score')}: $score'),
-                  _chip('${t('best')}: $best'),
-                ],
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                _chip('${t('level')}: ${lv.index}'),
+                if (mode == GameMode.campaign) _chip('${t('unlocked')}: $unlockedCampaign', color: const Color(0xFFB388FF)),
+                _chip('${t('score')}: $score'),
+                _chip('${t('best')}: $best'),
+                _chip('${t('max')}: ${shortNumBig(topBig)}'),
+                _chip('${t('target')}: ${shortNumBig(target)}', color: const Color(0xFFFF4DFF)),
+                _chip('${t('move')}: $moves/${lv.move1}', color: const Color(0xFF39FF14)),
+                _chip('↔ $swaps', color: const Color(0xFF40C4FF)),
+                _chip('${t('episode')}: ${lv.episodeName}', color: const Color(0xFFFFD740)),
+                _chip('${t('goal')}: ${_goalText()}', color: const Color(0xFF64FFDA)),
+                if (testMode) _chip('TEST', color: const Color(0xFFFF5252)),
+              ]),
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: LinearProgressIndicator(
+                  value: p,
+                  minHeight: 8,
+                  backgroundColor: const Color(0xFF2D2450),
+                  color: const Color(0xFF39FF14),
+                ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, c) {
-                    const toolW = 88.0;
-                    final usableW = max(190.0, c.maxWidth - toolW * 2 - 2);
-                    final usableH = c.maxHeight;
+                    const toolW = 42.0;
+                    final usableW = max(120.0, c.maxWidth - toolW * 2 - 2);
+                    final usableH = c.maxHeight - 6;
                     final ratio = rows / cols;
 
                     double boardW = usableW;
@@ -1347,26 +1400,19 @@ void _startLevel(int idx, {bool hardReset = false}) {
                     }
                     final boardSize = Size(boardW, boardH);
 
-                    return Column(
+                    return Row(
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            _sideBtn(icon: Icons.swap_horiz_rounded, label: 'KAYDIR', onTap: () async { if (!isBusy) setState(() { swapMode = !swapMode; swapFirst = null; }); }),
-                            const SizedBox(width: 8),
-                            _sideBtn(icon: Icons.play_circle_fill_rounded, label: '+1', onTap: () async { if (isBusy) return; final ready = await adService.isAdReady(); if (!ready) await adService.loadAd(); await adService.showAd(onReward: () { setState(() => swaps++); _saveProgress(); }); }),
-                            const SizedBox(width: 8),
-                            _sideBtn(icon: Icons.emoji_events_rounded, label: 'TOP', onTap: _showLeaderboardDialog),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
+                        SizedBox(width: toolW, child: _sidePanelLeft()), // tüm ikonlar burada
                         Expanded(
                           child: Center(
-                            child: SizedBox(width: boardW, height: boardH, child: _buildBoard(boardSize)),
+                            child: SizedBox(
+                              width: boardW,
+                              height: boardH,
+                              child: _buildBoard(boardSize),
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 6),
-                        _bottomAdBanner(),
+                        SizedBox(width: toolW, child: _adPanelRight()), // boş tarafa reklam alanı
                       ],
                     );
                   },
@@ -1379,17 +1425,153 @@ void _startLevel(int idx, {bool hardReset = false}) {
     );
   }
 
-  Widget _bottomAdBanner() {
-    return Container(
-      height: 38,
-      margin: const EdgeInsets.symmetric(horizontal: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF15112A),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFF4B3F7F)),
+  Widget _sidePanelLeft() {
+    return LayoutBuilder(
+      builder: (context, c) => SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: c.maxHeight),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+        _logoCard('MERGE BLOCKS', mode == GameMode.campaign ? 'CAMP' : 'ENDL'),
+        const SizedBox(height: 6),
+        _logoCard('NEON', 'GRID'),
+        const SizedBox(height: 8),
+        _sideBtn(
+          icon: swapMode ? Icons.close : Icons.swap_horiz,
+          label: '$swaps',
+          onTap: (swaps > 0 && !isBusy)
+              ? () {
+                  setState(() {
+                    swapMode = !swapMode;
+                    if (!swapMode) swapFirst = null;
+                  });
+                  _saveProgress();
+                }
+              : null,
+        ),
+        const SizedBox(height: 6),
+        _sideBtn(
+          icon: Icons.play_circle_fill,
+          label: '+1',
+          onTap: !isBusy
+              ? () async {
+                  final ready = await adService.isAdReady();
+                  if (!ready) await adService.loadAd();
+                  await adService.showAd(onReward: () {
+                    setState(() => swaps++);
+                    _saveProgress();
+                  });
+                }
+              : null,
+        ),
+        const SizedBox(height: 6),
+        _sideBtn(icon: Icons.emoji_events, label: 'TOP', onTap: _showLeaderboardDialog),
+            ],
+          ),
+        ),
       ),
-      alignment: Alignment.center,
-      child: Text(lang == AppLang.tr ? 'Reklam Banner' : 'Ad Banner', style: const TextStyle(fontSize: 11, color: Color(0xFFB0BEC5), fontWeight: FontWeight.w700)),
+    );
+  }
+
+  Widget _adPanelRight() {
+    // Reklam SDK bağlama noktası: gerçek banner widget buraya yerleştirilebilir.
+    return LayoutBuilder(
+      builder: (context, c) => SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: c.maxHeight),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 52,
+                height: 210,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0xFF1A1533), Color(0xFF0F0B23)],
+                  ),
+                  border: Border.all(color: const Color(0xFF6A52D9), width: 1.2),
+                  boxShadow: const [BoxShadow(color: Color(0x3300E5FF), blurRadius: 8)],
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.campaign, color: Color(0xFF00E5FF), size: 18),
+                    const SizedBox(height: 8),
+                    RotatedBox(
+                      quarterTurns: 3,
+                      child: Text(
+                        lang == AppLang.tr ? 'REKLAM BANNER' : 'AD BANNER',
+                        style: const TextStyle(
+                          color: Color(0xFFB0BEC5),
+                          fontWeight: FontWeight.w800,
+                          fontSize: 10,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: 34,
+                      height: 70,
+                      decoration: BoxDecoration(
+                        color: const Color(0x2211CFFF),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0x5588E5FF)),
+                      ),
+                      alignment: Alignment.center,
+                      child: const Text(
+                        '320x50 / Adaptive',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Color(0xFF90A4AE),
+                          fontSize: 8,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _logoCard(String a, String b) {
+    return Container(
+      width: 50,
+      height: 96,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF2B2152), Color(0xFF171129)]),
+        border: Border.all(color: const Color(0xFF6A52D9), width: 1.2),
+        boxShadow: const [BoxShadow(color: Color(0x3300E5FF), blurRadius: 8)],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 1.0, vertical: 1.0),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(a, maxLines: 1, overflow: TextOverflow.visible, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Color(0xFF39FF14))),
+              const SizedBox(height: 1),
+              Text(b, maxLines: 1, overflow: TextOverflow.visible, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: Color(0xFFFF4DFF))),
+              const SizedBox(height: 4),
+              const Icon(Icons.auto_awesome, size: 14, color: Color(0xFF00E5FF)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1549,7 +1731,7 @@ if (_isLevelGoalCompleted() && mounted) {
         score += merged + path.length * 18;
         if (score > best) best = score;
 
-        await _sfxMerge(path.length);
+        await _sfxMerge();
         _spawnComboParticles(_cellCenter(target, boardSize), path.length);
         await _applyGravityAndRefill();
         _rebuildValueColorMapFromGrid();
@@ -1695,7 +1877,7 @@ if (_isLevelGoalCompleted() && mounted) {
                         colors: [
                           const Color(0xCC1A1240),
                           const Color(0xE60E0A22),
-                          Colors.black.withOpacity( 0.88),
+                          Colors.black.withOpacity(0.88),
                         ],
                       ),
                     ),
@@ -1835,13 +2017,13 @@ if (_isLevelGoalCompleted() && mounted) {
                   width: sw ? 3 : (sel ? 2 : 1),
                 ),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity( 0.35), blurRadius: 7, offset: const Offset(0, 3)),
-                  if (sel) BoxShadow(color: Colors.white.withOpacity( glowAnim.value), blurRadius: 8),
+                  BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 7, offset: const Offset(0, 3)),
+                  if (sel) BoxShadow(color: Colors.white.withOpacity(glowAnim.value), blurRadius: 8),
                 ],
               ),
               child: Stack(
                 children: [
-                  Positioned(left: 5, right: 5, top: 4, child: Container(height: 8, decoration: BoxDecoration(color: Colors.white.withOpacity( 0.22), borderRadius: BorderRadius.circular(8)))),
+                  Positioned(left: 5, right: 5, top: 4, child: Container(height: 8, decoration: BoxDecoration(color: Colors.white.withOpacity(0.22), borderRadius: BorderRadius.circular(8)))),
                   Center(
                     child: cell.blocked
                         ? Transform.scale(
@@ -1863,7 +2045,7 @@ if (_isLevelGoalCompleted() && mounted) {
                             ),
                           ),
 
-                                  Icon(Icons.lock, color: Colors.white.withOpacity( 0.95), size: 16),
+                                  Icon(Icons.lock, color: Colors.white.withOpacity(0.95), size: 16),
                                   Text('HP ${cell.blockerHp}', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900)),
                                 ]),
                           )
@@ -1929,14 +2111,14 @@ class PathPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = lowFx ? 6 : 10
         ..strokeCap = StrokeCap.round
-        ..shader = LinearGradient(colors: [dark.withOpacity( 0.9), dark]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)));
+        ..shader = LinearGradient(colors: [dark.withOpacity(0.9), dark]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)));
 
       if (!lowFx) {
         final glowPaint = Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 16
           ..strokeCap = StrokeCap.round
-          ..shader = LinearGradient(colors: [dark.withOpacity( 0.55), dark.withOpacity( 0.95)]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)))
+          ..shader = LinearGradient(colors: [dark.withOpacity(0.55), dark.withOpacity(0.95)]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)))
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
         canvas.drawLine(Offset(x1, y1), Offset(x2, y2), glowPaint);
       }
@@ -1947,17 +2129,17 @@ class PathPainter extends CustomPainter {
         final local = (energyPhase + i * 0.17) % 1.0;
         final ex = x1 + (x2 - x1) * local;
         final ey = y1 + (y2 - y1) * local;
-        final eColor = Color.lerp(Colors.white, const Color(0xFF00E5FF), t)!.withOpacity( 0.95);
+        final eColor = Color.lerp(Colors.white, const Color(0xFF00E5FF), t)!.withOpacity(0.95);
         final ePaint = Paint()..color = eColor..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
         canvas.drawCircle(Offset(ex, ey), 6.0, ePaint);
-        canvas.drawCircle(Offset(ex, ey), 2.6, Paint()..color = Colors.white.withOpacity( 0.95));
+        canvas.drawCircle(Offset(ex, ey), 2.6, Paint()..color = Colors.white.withOpacity(0.95));
       }
 
       final shine = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = lowFx ? 2 : 4
         ..strokeCap = StrokeCap.round
-        ..color = Colors.white.withOpacity( (0.42 - 0.18 * t + glow * 0.15).clamp(0.12, 0.58));
+        ..color = Colors.white.withOpacity((0.42 - 0.18 * t + glow * 0.15).clamp(0.12, 0.58));
       canvas.drawLine(Offset(x1, y1), Offset(x2, y2), shine);
     }
   }
@@ -1983,7 +2165,7 @@ class PopPainter extends CustomPainter {
     for (final c in cells) {
       final cx = boardPadding + c.c * (cw + gap) + cw / 2, cy = boardPadding + c.r * (ch + gap) + ch / 2;
       final rect = Rect.fromCenter(center: Offset(cx, cy), width: cw * scale, height: ch * scale);
-      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(12)), Paint()..color = Colors.white.withOpacity( 0.65 * alpha));
+      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(12)), Paint()..color = Colors.white.withOpacity(0.65 * alpha));
     }
   }
 
@@ -2000,7 +2182,7 @@ class ParticlesPainter extends CustomPainter {
     for (final p in particles) {
       final dx = cos(p.angle) * p.speed * t, dy = sin(p.angle) * p.speed * t;
       final pos = Offset(p.origin.dx + dx, p.origin.dy + dy);
-      canvas.drawCircle(pos, 1.7 + (1 - t) * 2.0, Paint()..color = p.color.withOpacity( (1 - t).clamp(0.0, 1.0)));
+      canvas.drawCircle(pos, 1.7 + (1 - t) * 2.0, Paint()..color = p.color.withOpacity((1 - t).clamp(0.0, 1.0)));
     }
   }
   @override
