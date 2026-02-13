@@ -24,7 +24,7 @@ class BlockerCrackPainter extends CustomPainter {
     final p = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = hp == 2 ? 1.8 : 2.2
-      ..color = Colors.black.withValues(alpha: hp == 2 ? 0.28 : 0.40)
+      ..color = Colors.black.withOpacity(hp == 2 ? 0.28 : 0.40)
       ..strokeCap = StrokeCap.round;
 
     if (hp >= 3) return;
@@ -48,7 +48,7 @@ class BlockerCrackPainter extends CustomPainter {
       final p2 = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.4
-        ..color = Colors.black.withValues(alpha: 0.50)
+        ..color = Colors.black.withOpacity(0.50)
         ..strokeCap = StrokeCap.round;
 
       final path2 = Path()
@@ -1229,8 +1229,8 @@ void _startLevel(int idx, {bool hardReset = false}) {
         fontSize: s,
         fontWeight: FontWeight.w900,
         shadows: [
-          Shadow(color: c.withValues(alpha: 0.95), blurRadius: 10),
-          Shadow(color: c.withValues(alpha: 0.45), blurRadius: 22),
+          Shadow(color: c.withOpacity(0.95), blurRadius: 10),
+          Shadow(color: c.withOpacity(0.45), blurRadius: 22),
         ],
       );
 
@@ -1766,7 +1766,7 @@ if (_isLevelGoalCompleted() && mounted) {
                         colors: [
                           const Color(0xCC1A1240),
                           const Color(0xE60E0A22),
-                          Colors.black.withValues(alpha: 0.88),
+                          Colors.black.withOpacity(0.88),
                         ],
                       ),
                     ),
@@ -1907,13 +1907,13 @@ final innerW = boardSize.width - boardPadding * 2, innerH = boardSize.height - b
                   width: sw ? 3 : (sel ? 2 : 1),
                 ),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 7, offset: const Offset(0, 3)),
-                  if (sel) BoxShadow(color: Colors.white.withValues(alpha: glowAnim.value), blurRadius: 8),
+                  BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 7, offset: const Offset(0, 3)),
+                  if (sel) BoxShadow(color: Colors.white.withOpacity(glowAnim.value), blurRadius: 8),
                 ],
               ),
               child: Stack(
                 children: [
-                  Positioned(left: 5, right: 5, top: 4, child: Container(height: 8, decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.22), borderRadius: BorderRadius.circular(8)))),
+                  Positioned(left: 5, right: 5, top: 4, child: Container(height: 8, decoration: BoxDecoration(color: Colors.white.withOpacity(0.22), borderRadius: BorderRadius.circular(8)))),
                   Center(
                     child: cell.blocked
                         ? Transform.scale(
@@ -1935,7 +1935,7 @@ final innerW = boardSize.width - boardPadding * 2, innerH = boardSize.height - b
                             ),
                           ),
 
-                                  Icon(Icons.lock, color: Colors.white.withValues(alpha: 0.95), size: 16),
+                                  Icon(Icons.lock, color: Colors.white.withOpacity(0.95), size: 16),
                                   Text('HP ${cell.blockerHp}', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900)),
                                 ]),
                           )
@@ -2012,14 +2012,14 @@ class PathPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = lowFx ? 6 : 10
         ..strokeCap = StrokeCap.round
-        ..shader = LinearGradient(colors: [dark.withValues(alpha: 0.9), dark]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)));
+        ..shader = LinearGradient(colors: [dark.withOpacity(0.9), dark]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)));
 
       if (!lowFx) {
         final glowPaint = Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 16
           ..strokeCap = StrokeCap.round
-          ..shader = LinearGradient(colors: [dark.withValues(alpha: 0.55), dark.withValues(alpha: 0.95)]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)))
+          ..shader = LinearGradient(colors: [dark.withOpacity(0.55), dark.withOpacity(0.95)]).createShader(Rect.fromPoints(Offset(x1, y1), Offset(x2, y2)))
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
         canvas.drawLine(Offset(x1, y1), Offset(x2, y2), glowPaint);
       }
@@ -2030,17 +2030,17 @@ class PathPainter extends CustomPainter {
         final local = (energyPhase + i * 0.17) % 1.0;
         final ex = x1 + (x2 - x1) * local;
         final ey = y1 + (y2 - y1) * local;
-        final eColor = Color.lerp(Colors.white, const Color(0xFF00E5FF), t)!.withValues(alpha: 0.95);
+        final eColor = Color.lerp(Colors.white, const Color(0xFF00E5FF), t)!.withOpacity(0.95);
         final ePaint = Paint()..color = eColor..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
         canvas.drawCircle(Offset(ex, ey), 6.0, ePaint);
-        canvas.drawCircle(Offset(ex, ey), 2.6, Paint()..color = Colors.white.withValues(alpha: 0.95));
+        canvas.drawCircle(Offset(ex, ey), 2.6, Paint()..color = Colors.white.withOpacity(0.95));
       }
 
       final shine = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = lowFx ? 2 : 4
         ..strokeCap = StrokeCap.round
-        ..color = Colors.white.withValues(alpha: (0.42 - 0.18 * t + glow * 0.15).clamp(0.12, 0.58));
+        ..color = Colors.white.withOpacity((0.42 - 0.18 * t + glow * 0.15).clamp(0.12, 0.58));
       canvas.drawLine(Offset(x1, y1), Offset(x2, y2), shine);
     }
   }
@@ -2066,7 +2066,7 @@ class PopPainter extends CustomPainter {
     for (final c in cells) {
       final cx = boardPadding + c.c * (cw + gap) + cw / 2, cy = boardPadding + c.r * (ch + gap) + ch / 2;
       final rect = Rect.fromCenter(center: Offset(cx, cy), width: cw * scale, height: ch * scale);
-      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(12)), Paint()..color = Colors.white.withValues(alpha: 0.65 * alpha));
+      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(12)), Paint()..color = Colors.white.withOpacity(0.65 * alpha));
     }
   }
 
@@ -2083,7 +2083,7 @@ class ParticlesPainter extends CustomPainter {
     for (final p in particles) {
       final dx = cos(p.angle) * p.speed * t, dy = sin(p.angle) * p.speed * t;
       final pos = Offset(p.origin.dx + dx, p.origin.dy + dy);
-      canvas.drawCircle(pos, 1.7 + (1 - t) * 2.0, Paint()..color = p.color.withValues(alpha: (1 - t).clamp(0.0, 1.0)));
+      canvas.drawCircle(pos, 1.7 + (1 - t) * 2.0, Paint()..color = p.color.withOpacity((1 - t).clamp(0.0, 1.0)));
     }
   }
   @override
