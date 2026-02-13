@@ -222,7 +222,7 @@ class UltraGamePage extends StatefulWidget {
   State<UltraGamePage> createState() => _UltraGamePageState();
 }
 
-class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateMixin {
+class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateMixin, WidgetsBindingObserver {
   // === Stable unique colors by tile VALUE ===
   final Map<int, int> _valueColorIndex = {}; // value -> palette index
   static const List<Color> _valuePalette = [
@@ -366,6 +366,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     glowCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 860))..repeat(reverse: true);
     glowAnim = Tween<double>(begin: 0.24, end: 0.92).animate(CurvedAnimation(parent: glowCtrl, curve: Curves.easeInOut));
     energyCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
@@ -378,7 +379,15 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      _saveProgress();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     glowCtrl.dispose();
     energyCtrl.dispose();
     super.dispose();
@@ -911,13 +920,18 @@ void _startLevel(int idx, {bool hardReset = false}) {
   Future<void> _sfxLight() async {
     if (!sfxOn) return;
     await HapticFeedback.selectionClick();
+    // Piano hissi için kısa tek nota
     await SystemSound.play(SystemSoundType.click);
   }
 
   Future<void> _sfxMerge() async {
     if (!sfxOn) return;
     await HapticFeedback.mediumImpact();
-    await SystemSound.play(SystemSoundType.click);
+    // Birleşme sonrası blok sayısına bağlı piyano benzeri arpej
+    for (final ms in [0, 45, 90, 135]) {
+      if (ms > 0) await Future.delayed(Duration(milliseconds: ms == 45 ? 45 : 35));
+      await SystemSound.play(SystemSoundType.click);
+    }
   }
 
   Pos? _cellFromLocal(Offset local, Size boardSize) {
@@ -1139,13 +1153,13 @@ void _startLevel(int idx, {bool hardReset = false}) {
 
     Future<void> _maybeShowIntro() async {
     // Her bölüm başlangıcında göster (test mode dahil) - PREMIUM / 2x süre
-    final lvl = lv.index;
+    final _ = levelIdx + 1;
     final targetTxt = shortNumBig(lv.targetBig);
 
     showIntro = true;
 
     // Faz 1: 
-    episodeIntroTitle = (lang == AppLang.tr) ? 'BÖLÜM $lvl' : 'LEVEL $lvl';
+    episodeIntroTitle = (lang == AppLang.tr) ? 'HAZIR' : 'READY';
     episodeIntroRule = (lang == AppLang.tr) ? 'Hazır mısın?' : 'Are you ready?';
     if (mounted) setState(() {});
     await Future.delayed(const Duration(milliseconds: 2000)); // ~2x
@@ -1638,6 +1652,12 @@ if (_isLevelGoalCompleted() && mounted) {
         if (score > best) best = score;
 
         await _sfxMerge();
+        // combo büyüdükçe ek notalar
+        final extraNotes = (path.length - 2).clamp(0, 6);
+        for (int i=0; i<extraNotes; i++) {
+          await Future.delayed(const Duration(milliseconds: 28));
+          await SystemSound.play(SystemSoundType.click);
+        }
         _spawnComboParticles(_cellCenter(target, boardSize), path.length);
         await _applyGravityAndRefill();
         _rebuildValueColorMapFromGrid();
