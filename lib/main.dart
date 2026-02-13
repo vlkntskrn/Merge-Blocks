@@ -702,6 +702,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+              const SizedBox(height: 8),
                 const TabBar(
                   isScrollable: true,
                   tabs: [
@@ -910,11 +911,13 @@ void _startLevel(int idx, {bool hardReset = false}) {
   Future<void> _sfxLight() async {
     if (!sfxOn) return;
     await HapticFeedback.selectionClick();
+    await SystemSound.play(SystemSoundType.click);
   }
 
   Future<void> _sfxMerge() async {
     if (!sfxOn) return;
     await HapticFeedback.mediumImpact();
+    await SystemSound.play(SystemSoundType.click);
   }
 
   Pos? _cellFromLocal(Offset local, Size boardSize) {
@@ -1989,6 +1992,7 @@ final innerW = boardSize.width - boardPadding * 2, innerH = boardSize.height - b
 }
 
 // ---------- Painters ----------
+
 class PathPainter extends CustomPainter {
   final List<Pos> path;
   final int rows, cols;
