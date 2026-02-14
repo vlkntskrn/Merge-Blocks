@@ -12,7 +12,45 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+
+// --------------------
+// DartPad uyumlu basit kalıcı hafıza (SharedPreferences yerine).
+// Flutter uygulamada gerçek SharedPreferences kullanmak istersen,
+// bu sınıfı kaldırıp tekrar shared_preferences paketini ekleyebilirsin.
+// --------------------
+class SimplePrefs {
+  static final Map<String, Object> _mem = <String, Object>{};
+  SimplePrefs._();
+
+  static Future<SimplePrefs> getInstance() async => SimplePrefs._();
+
+  int? getInt(String key) => _mem[key] is int ? _mem[key] as int : null;
+  bool? getBool(String key) => _mem[key] is bool ? _mem[key] as bool : null;
+  String? getString(String key) => _mem[key] is String ? _mem[key] as String : null;
+  List<String>? getStringList(String key) =>
+      _mem[key] is List<String> ? List<String>.from(_mem[key] as List) : null;
+
+  Future<bool> setInt(String key, int value) async {
+    _mem[key] = value;
+    return true;
+  }
+
+  Future<bool> setBool(String key, bool value) async {
+    _mem[key] = value;
+    return true;
+  }
+
+  Future<bool> setString(String key, String value) async {
+    _mem[key] = value;
+    return true;
+  }
+
+  Future<bool> setStringList(String key, List<String> value) async {
+    _mem[key] = List<String>.from(value);
+    return true;
+  }
+}
+
 
 
 class BlockerCrackPainter extends CustomPainter {
@@ -601,7 +639,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
 
   // ---------- Persistence ----------
   Future<void> _loadProgress() async {
-    final p = await SharedPreferences.getInstance();
+    final p = await SimplePrefs.getInstance();
     setState(() {
       levelIdx = (p.getInt(_kLevel) ?? 0).clamp(0, 999999).toInt();
       unlockedCampaign = (p.getInt(_kUnlocked) ?? 1).clamp(1, 100).toInt();
@@ -617,11 +655,11 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
       if (mode == GameMode.endless && levelIdx < 100) levelIdx = 100;
     });
     _startLevel(levelIdx);
-                  _rebuildValueColorMapFromGrid();
+    _rebuildValueColorMapFromGrid();
   }
 
   Future<void> _saveProgress() async {
-    final p = await SharedPreferences.getInstance();
+    final p = await SimplePrefs.getInstance();
     await p.setInt(_kLevel, levelIdx);
     await p.setInt(_kUnlocked, unlockedCampaign);
     await p.setInt(_kBest, best);
@@ -635,7 +673,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
   Future<List<LeaderboardEntry>> _loadLocalLb() async {
-    final p = await SharedPreferences.getInstance();
+    final p = await SimplePrefs.getInstance();
     final raw = p.getStringList(_kLb) ?? [];
     return raw.map((e) {
       final s = e.split('|');
@@ -650,7 +688,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
   Future<void> _saveLocalLb(List<LeaderboardEntry> list) async {
-    final p = await SharedPreferences.getInstance();
+    final p = await SimplePrefs.getInstance();
     final raw = list
         .map((e) => '${e.name}|${e.score}|${e.level}|${e.date.toIso8601String()}|${e.mode == GameMode.endless ? 'endless' : 'campaign'}')
         .toList();
@@ -1118,7 +1156,7 @@ void _startLevel(int idx, {bool hardReset = false}) {
   // ---------- UI Text ----------
   String t(String key) {
     const tr = {
-      'title':'MERGE BLOCKS NEON CHAIN','level':'Bölüm','score':'Skor','best':'En iyi','max':'En büyük','target':'Hedef','move':'Hamle',
+      'title':'MERGE BLOCKS NEON CHAIN','level':'Bölüm','score':'Skor','best':'En iyi','max':'En Büyük','target':'Hedef','move':'Hamle',
       'mode':'Mod','campaign':'Kampanya','endless':'Sonsuz',
       'episode':'Episode','goal':'Özel Hedef','unlocked':'Açık Bölüm',
       'language':'Dil','numfmt':'Sayı','tr':'TR','en':'EN',
@@ -1189,7 +1227,7 @@ void _startLevel(int idx, {bool hardReset = false}) {
 
   Future<void> _maybeShowBlockerTooltip() async {
     if (lv.goalType != GoalType.clearBlockers && lv.blockerCount <= 0) return;
-    final p = await SharedPreferences.getInstance();
+    final p = await SimplePrefs.getInstance();
     final seen = p.getBool(_kBlockerTipSeen) ?? false;
     if (seen) return;
     showBlockerTip = true;
@@ -1248,9 +1286,16 @@ void _startLevel(int idx, {bool hardReset = false}) {
     }
   }
 
+  // Kısa sayı (int) - BigInt sürümüne köprü
+  String shortNum(int n) => shortNumBig(BigInt.from(n));
+
+
   String shortNumInt(int n) => shortNumBig(BigInt.from(n));
 
   // stable palette
+  // UI min/max pill'leri için değer rengi
+  Color _valueColor(int v) => _colorForValue(v);
+
   Color _tileColor(int v) => _colorForValue(v);
 
   TextStyle _neon(Color c, double s) => TextStyle(
@@ -1264,15 +1309,88 @@ void _startLevel(int idx, {bool hardReset = false}) {
       );
 
   Widget _chip(String txt, {Color color = const Color(0xFF39FF14)}) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           color: const Color(0xFF21193C),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withOpacity(0.58)),
-          boxShadow: [BoxShadow(color: color.withOpacity(0.25), blurRadius: 8)],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.60)),
+          boxShadow: [BoxShadow(color: color.withOpacity(0.22), blurRadius: 10)],
         ),
-        child: Text(txt, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 11)),
+        child: Text(
+          txt,
+          style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 12.5),
+        ),
       );
+
+  Widget _topActionBtn({
+  required IconData icon,
+  required String title,
+  String? subtitle,
+  VoidCallback? onTap,
+  Color accent = const Color(0xFF39FF14),
+}) {
+  final enabled = onTap != null;
+  return Opacity(
+    opacity: enabled ? 1.0 : 0.45,
+    child: Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF2A214B), Color(0xFF1A1436)],
+            ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: accent.withOpacity(0.55), width: 1.2),
+            boxShadow: const [
+              BoxShadow(color: Color(0x66000000), blurRadius: 12, offset: Offset(0, 7)),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: accent),
+              const SizedBox(width: 8),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 11.5,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.80),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+
 
   bool _isFallTarget(int r, int c) {
     for (final t in fallingTiles) {
@@ -1293,8 +1411,56 @@ void _startLevel(int idx, {bool hardReset = false}) {
       backgroundColor: const Color(0xFF0B0A16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF17132C),
-        title: Text('${t('title')} • ${t('mode')}: ${mode == GameMode.campaign ? t('campaign') : t('endless')}',
-            style: _neon(const Color(0xFF39FF14), 18)),
+        title: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            alignment: WrapAlignment.center,
+            children: [
+              _chip('${t('score')}: $score'),
+              _chip('${t('max')}: ${shortNumBig(topBig)}'),
+              Tooltip(
+                message: _goalText(),
+                child: _chip('${t('target')}: ${shortNumBig(target)}', color: const Color(0xFFFF4DFF)),
+              ),
+              const SizedBox(width: 6),
+              _topActionBtn(
+                icon: swapMode ? Icons.close : Icons.swap_horiz,
+                title: 'SWAP',
+                subtitle: (lang == AppLang.tr)
+                    ? (swapMode ? 'Seçim: AÇIK' : 'Kalan: $swaps')
+                    : (swapMode ? 'Select: ON' : 'Left: $swaps'),
+                onTap: (swaps > 0 && !isBusy)
+                    ? () {
+                        setState(() {
+                          swapMode = !swapMode;
+                          if (!swapMode) swapFirst = null;
+                        });
+                        _saveProgress();
+                      }
+                    : null,
+              ),
+              _topActionBtn(
+                icon: Icons.play_circle_fill,
+                title: '+1 SWAP',
+                subtitle: (lang == AppLang.tr) ? 'Reklam izle' : 'Watch ad',
+                accent: const Color(0xFFFFD24A),
+                onTap: !isBusy
+                    ? () async {
+                        final ready = await adService.isAdReady();
+                        if (!ready) await adService.loadAd();
+                        await adService.showAd(onReward: () {
+                          setState(() => swaps++);
+                          _saveProgress();
+                        });
+                      }
+                    : null,
+              ),
+
+            ],
+          ),
+        ),
         centerTitle: true,
         actions: [
           if (testMode)
@@ -1360,20 +1526,7 @@ void _startLevel(int idx, {bool hardReset = false}) {
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
           child: Column(
             children: [
-              Wrap(spacing: 6, runSpacing: 6, children: [
-                _chip('${t('level')}: ${lv.index}'),
-                if (mode == GameMode.campaign) _chip('${t('unlocked')}: $unlockedCampaign', color: const Color(0xFFB388FF)),
-                _chip('${t('score')}: $score'),
-                _chip('${t('best')}: $best'),
-                _chip('${t('max')}: ${shortNumBig(topBig)}'),
-                _chip('${t('target')}: ${shortNumBig(target)}', color: const Color(0xFFFF4DFF)),
-                _chip('${t('move')}: $moves/${lv.move1}', color: const Color(0xFF39FF14)),
-                _chip('↔ $swaps', color: const Color(0xFF40C4FF)),
-                _chip('${t('episode')}: ${lv.episodeName}', color: const Color(0xFFFFD740)),
-                _chip('${t('goal')}: ${_goalText()}', color: const Color(0xFF64FFDA)),
-                if (testMode) _chip('TEST', color: const Color(0xFFFF5252)),
-              ]),
-              const SizedBox(height: 6),
+              
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: LinearProgressIndicator(
@@ -1384,27 +1537,40 @@ void _startLevel(int idx, {bool hardReset = false}) {
                 ),
               ),
               const SizedBox(height: 6),
+              _minMaxNextStrip(),
+              const SizedBox(height: 6),
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, c) {
-                    const toolW = 42.0;
-                    final usableW = max(120.0, c.maxWidth - toolW * 2 - 2);
-                    final usableH = c.maxHeight - 6;
-                    final ratio = rows / cols;
+                    // Yeni premium yerleşim: Board tam ortada, yan paneller overlay (board alanını daraltmaz)
+                    // Sağda banner alanı için ince bir şerit bırakıyoruz (board'u örtmez).
+                    const rightPanelW = 0.0;
+                    const leftPanelW = 0.0;
+                    final usableW = c.maxWidth;
+                    final usableH = c.maxHeight;
 
-                    double boardW = usableW;
-                    double boardH = boardW * ratio;
-                    if (boardH > usableH) {
-                      boardH = usableH;
-                      boardW = boardH / ratio;
+                    // Board: width/height oranı = cols/rows
+                    final ratioWH = cols / rows;
+
+                    // Board'u daraltmamak için: sadece sağ banner şeridi kadar güvenli alan bırak.
+                    final centerSafeW = max(120.0, usableW - (rightPanelW + leftPanelW + 16));
+                    double boardW = min(centerSafeW, usableH * ratioWH);
+                    double boardH = boardW / ratioWH;
+
+                    // Aşırı küçük ekranda (nadir) panelleri yok sayıp board'u yine de sığdıralım
+                    if (boardW < 160) {
+                      boardW = min(usableW, usableH * ratioWH);
+                      boardH = boardW / ratioWH;
                     }
+
                     final boardSize = Size(boardW, boardH);
 
-                    return Row(
+                    return Stack(
                       children: [
-                        SizedBox(width: toolW, child: _sidePanelLeft()), // tüm ikonlar burada
-                        Expanded(
-                          child: Center(
+                        // Board
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 8, right: rightPanelW + 8),
                             child: SizedBox(
                               width: boardW,
                               height: boardH,
@@ -1412,7 +1578,9 @@ void _startLevel(int idx, {bool hardReset = false}) {
                             ),
                           ),
                         ),
-                        SizedBox(width: toolW, child: _adPanelRight()), // boş tarafa reklam alanı
+
+                        // Alt banner (yatay) - board'un altına, asla üstüne binmez
+                        _positionedBottomBanner(usableW: usableW, usableH: usableH, boardW: boardW, boardH: boardH),
                       ],
                     );
                   },
@@ -1425,182 +1593,214 @@ void _startLevel(int idx, {bool hardReset = false}) {
     );
   }
 
-  Widget _sidePanelLeft() {
-    return LayoutBuilder(
-      builder: (context, c) => SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(minHeight: c.maxHeight),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-        _logoCard('MERGE BLOCKS', mode == GameMode.campaign ? 'CAMP' : 'ENDL'),
-        const SizedBox(height: 6),
-        _logoCard('NEON', 'GRID'),
-        const SizedBox(height: 8),
-        _sideBtn(
-          icon: swapMode ? Icons.close : Icons.swap_horiz,
-          label: '$swaps',
-          onTap: (swaps > 0 && !isBusy)
-              ? () {
-                  setState(() {
-                    swapMode = !swapMode;
-                    if (!swapMode) swapFirst = null;
-                  });
-                  _saveProgress();
-                }
-              : null,
-        ),
-        const SizedBox(height: 6),
-        _sideBtn(
-          icon: Icons.play_circle_fill,
-          label: '+1',
-          onTap: !isBusy
-              ? () async {
-                  final ready = await adService.isAdReady();
-                  if (!ready) await adService.loadAd();
-                  await adService.showAd(onReward: () {
-                    setState(() => swaps++);
-                    _saveProgress();
-                  });
-                }
-              : null,
-        ),
-        const SizedBox(height: 6),
-        _sideBtn(icon: Icons.emoji_events, label: 'TOP', onTap: _showLeaderboardDialog),
-            ],
-          ),
-        ),
-      ),
-    );
+int _minTileValue() {
+  var minV = 0;
+  for (final row in grid) {
+    for (final c in row) {
+      final v = c.value;
+      if (v <= 0) continue;
+      if (minV == 0 || v < minV) minV = v;
+    }
   }
+  return minV == 0 ? 2 : minV;
+}
 
-  Widget _adPanelRight() {
-    // Reklam SDK bağlama noktası: gerçek banner widget buraya yerleştirilebilir.
-    return LayoutBuilder(
-      builder: (context, c) => SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(minHeight: c.maxHeight),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 52,
-                height: 210,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xFF1A1533), Color(0xFF0F0B23)],
-                  ),
-                  border: Border.all(color: const Color(0xFF6A52D9), width: 1.2),
-                  boxShadow: const [BoxShadow(color: Color(0x3300E5FF), blurRadius: 8)],
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.campaign, color: Color(0xFF00E5FF), size: 18),
-                    const SizedBox(height: 8),
-                    RotatedBox(
-                      quarterTurns: 3,
-                      child: Text(
-                        lang == AppLang.tr ? 'REKLAM BANNER' : 'AD BANNER',
-                        style: const TextStyle(
-                          color: Color(0xFFB0BEC5),
-                          fontWeight: FontWeight.w800,
-                          fontSize: 10,
-                          letterSpacing: 0.6,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      width: 34,
-                      height: 70,
-                      decoration: BoxDecoration(
-                        color: const Color(0x2211CFFF),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0x5588E5FF)),
-                      ),
-                      alignment: Alignment.center,
-                      child: const Text(
-                        '320x50 / Adaptive',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Color(0xFF90A4AE),
-                          fontSize: 8,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+int _maxTileValue() {
+  var maxV = 0;
+  for (final row in grid) {
+    for (final c in row) {
+      final v = c.value;
+      if (v > maxV) maxV = v;
+    }
   }
+  return maxV == 0 ? 2 : maxV;
+}
 
-  Widget _logoCard(String a, String b) {
-    return Container(
-      width: 50,
-      height: 96,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF2B2152), Color(0xFF171129)]),
-        border: Border.all(color: const Color(0xFF6A52D9), width: 1.2),
-        boxShadow: const [BoxShadow(color: Color(0x3300E5FF), blurRadius: 8)],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 1.0, vertical: 1.0),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(a, maxLines: 1, overflow: TextOverflow.visible, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Color(0xFF39FF14))),
-              const SizedBox(height: 1),
-              Text(b, maxLines: 1, overflow: TextOverflow.visible, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: Color(0xFFFF4DFF))),
-              const SizedBox(height: 4),
-              const Icon(Icons.auto_awesome, size: 14, color: Color(0xFF00E5FF)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+int _nextTargetValue() {
+  final m = _maxTileValue();
+  // "Bir üst blok" = ekrandaki en yüksek değerli bloğun bir üstü
+  // (örn: 64 -> 128). Overflow riskine karşı güvenli çarpma.
+  if (m > 0 && m <= 1073741824) return m * 2;
+  // Çok büyükte de mantık aynı; sadece taşmayı önlemek için sınırlı büyüt.
+  return m;
+}
 
-  Widget _sideBtn({required IconData icon, required String label, VoidCallback? onTap}) {
-    return Material(
-      color: const Color(0xFF231B42),
+Widget _minMaxNextStrip() {
+  final minV = _minTileValue();
+  final maxV = _maxTileValue();
+  final nextV = _nextTargetValue();
+
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    decoration: BoxDecoration(
+      color: const Color(0xFF141028),
       borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Container(
-          width: 48,
-          height: 56,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFF6A52D9), width: 1.2),
-            boxShadow: const [BoxShadow(color: Color(0x3300E5FF), blurRadius: 8)],
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 22, color: Colors.white),
-              if (label.isNotEmpty) Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800)),
-            ],
-          ),
+      border: Border.all(color: const Color(0xFF39FF14).withOpacity(0.22)),
+    ),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // İnce yeşil çizgi
+        Container(height: 1.2, color: const Color(0xFF39FF14).withOpacity(0.55)),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _tilePill(value: minV, label: lang == AppLang.tr ? 'Min' : 'Min'),
+              ),
+            ),
+            Expanded(
+              child: Align(
+                alignment: Alignment.center,
+                child: _tilePill(value: maxV, label: lang == AppLang.tr ? 'Max' : 'Max'),
+              ),
+            ),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: _tilePill(value: nextV, label: lang == AppLang.tr ? 'Hedef+' : 'Next'),
+              ),
+            ),
+          ],
         ),
+      ],
+    ),
+  );
+}
+
+Widget _tilePill({required int value, required String label}) {
+  final c = _valueColor(value);
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          const Color(0xFF231B42),
+          const Color(0xFF17132C),
+        ],
       ),
-    );
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: c.withOpacity(0.55), width: 1.2),
+      boxShadow: const [
+        BoxShadow(color: Color(0x66000000), blurRadius: 12, offset: Offset(0, 7)),
+      ],
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _miniTile(value: value),
+        const SizedBox(width: 8),
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.78),
+                fontSize: 10.5,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.2,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              shortNum(value),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
+Widget _miniTile({required int value}) {
+  final c = _valueColor(value);
+  return Container(
+    width: 28,
+    height: 28,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: c.withOpacity(0.20),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: c.withOpacity(0.85), width: 1.2),
+      boxShadow: [
+        BoxShadow(color: c.withOpacity(0.35), blurRadius: 10, offset: const Offset(0, 6)),
+      ],
+    ),
+    child: Text(
+      shortNum(value),
+      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 11),
+    ),
+  );
+}
+
+Widget _positionedBottomBanner({
+  required double usableW,
+  required double usableH,
+  required double boardW,
+  required double boardH,
+}) {
+  // Board Center: top offset
+  final boardTop = (usableH - boardH) / 2;
+  final desiredH = 52.0;
+  final gap = 10.0;
+
+  final y = boardTop + boardH + gap;
+  var h = desiredH;
+  if (y + h > usableH - 6) {
+    h = max(36.0, usableH - y - 6);
   }
+  if (h <= 0) return const SizedBox.shrink();
+
+  final w = min(usableW - 16, boardW); // board genişliğini aşma
+  return Positioned(
+    left: (usableW - w) / 2,
+    top: y,
+    width: w,
+    height: h,
+    child: _adBannerHorizontal(width: w, height: h),
+  );
+}
+
+Widget _adBannerHorizontal({required double width, required double height}) {
+  // Reklam SDK bağlama noktası: gerçek banner widget buraya yerleştirilebilir.
+  return Container(
+    width: width,
+    height: height,
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: const Color(0xFFFFD24A).withOpacity(0.30)),
+      gradient: const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF2A214B), Color(0xFF1A1436)],
+      ),
+      boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 14, offset: Offset(0, 8))],
+    ),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Icon(Icons.campaign, color: Color(0xFFFFD24A), size: 18),
+        const SizedBox(width: 8),
+        Text(
+          lang == AppLang.tr ? 'Reklam Alanı' : 'Ad Banner',
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
+        ),
+      ],
+    ),
+  );
+}
 
   Widget _buildBoard(Size boardSize) {
     return GestureDetector(
