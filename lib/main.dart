@@ -426,7 +426,8 @@ int? _pendingDuplicateValue;
     adService.initialize();
     mode = GameMode.endless;
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-    _startLevel(100, hardReset: true);
+    // removed forced reset to preserve saved state
+
     _loadProgress();
   }
 
@@ -679,7 +680,7 @@ int? _pendingDuplicateValue;
   final f = p.getStringList(_kGridF) ?? const <String>[];
   final hasSnap = v.length == rows * cols && b.length == rows * cols && f.length == rows * cols;
 
-  _startLevel(levelIdx, hardReset: !hasSnap);
+  _startLevel(levelIdx, hardReset: false);
 
   if (hasSnap) {
     // restore counters
@@ -703,6 +704,9 @@ int? _pendingDuplicateValue;
     }
   }
 
+  if (!hasSnap) {
+    _startLevel(levelIdx, hardReset: false);
+  }
   _rebuildValueColorMapFromGrid();
   setState(() {});
 }
