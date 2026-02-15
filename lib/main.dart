@@ -14,6 +14,58 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+
+class _ElectricLinePainter extends CustomPainter {
+  final double t;
+  final Color color;
+  _ElectricLinePainter(this.t, this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0
+      ..strokeCap = StrokeCap.round
+      ..color = color.withOpacity(0.85);
+
+    final glow = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 6.0
+      ..strokeCap = StrokeCap.round
+      ..color = color.withOpacity(0.22);
+
+    final path = Path();
+    final midY = size.height * 0.5;
+    final startX = 0.0;
+    final endX = size.width;
+
+    // zigzag line
+    const segments = 7;
+    path.moveTo(startX, midY);
+    for (int i = 1; i <= segments; i++) {
+      final x = (endX / segments) * i;
+      final phase = (t * 6.2831) + i * 1.1;
+      final amp = size.height * 0.18;
+      final y = midY + sin(phase) * amp * (i.isEven ? 1.0 : -1.0);
+      path.lineTo(x, y);
+    }
+
+    canvas.drawPath(path, glow);
+    canvas.drawPath(path, p);
+
+    // moving spark
+    final sparkX = (endX * (t % 1.0));
+    final spark = Paint()..color = color.withOpacity(0.95);
+    canvas.drawCircle(Offset(sparkX, midY), 3.2, spark);
+    canvas.drawCircle(Offset(sparkX, midY), 7.0, spark..color = color.withOpacity(0.18));
+  }
+
+  @override
+  bool shouldRepaint(covariant _ElectricLinePainter oldDelegate) =>
+      oldDelegate.t != t || oldDelegate.color != color;
+}
+
+
 // --------------------
 // DartPad uyumlu basit kalıcı hafıza (SharedPreferences yerine).
 // Flutter uygulamada gerçek SharedPreferences kullanmak istersen,
@@ -387,7 +439,17 @@ int? _pendingDuplicateValue;
 
   late final AnimationController glowCtrl;
   late final Animation<double> glowAnim;
-  late final AnimationController energyCtrl;
+  
+// Mini HUD electric + pulse animations (min/max/next)
+late final AnimationController hudPulseCtrl;
+late final Animation<double> hudPulseAnim;
+late final AnimationController electricCtrl;
+
+int _hudMinPrev = -1;
+int _hudMaxPrev = -1;
+int _hudNextPrev = -1;
+
+late final AnimationController energyCtrl;
   late final Animation<double> energyAnim;
 
   @override
@@ -412,6 +474,8 @@ int? _pendingDuplicateValue;
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     glowCtrl.dispose();
     energyCtrl.dispose();
+    hudPulseCtrl.dispose();
+    electricCtrl.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -1379,23 +1443,6 @@ Widget build(BuildContext context) {
   // Daha okunaklı: küçük ekranlarda bile büyük HUD (A52 dahil).
   final ui = (size.shortestSide / 360.0).clamp(1.40, 2.20);
 
-
-  Widget statChip(String label, String value, {required Color accent}) {
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 12 * ui, vertical: 8 * ui),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1436),
-        borderRadius: BorderRadius.circular(16 * ui),
-        border: Border.all(color: accent.withOpacity(0.60), width: 1.2),
-        boxShadow: [BoxShadow(color: accent.withOpacity(0.14), blurRadius: 14, offset: const Offset(0, 8))],
-      ),
-      child: Text(
-        '$label: $value',
-        style: TextStyle(color: accent, fontWeight: FontWeight.w900, fontSize: 14.5 * ui),
-      ),
-    );
-  }
-
   Widget hudBtn({
     required IconData icon,
     required String title,
@@ -1449,8 +1496,9 @@ Widget build(BuildContext context) {
     
 
 
+
 appBar: PreferredSize(
-  preferredSize: Size.fromHeight(70 * ui),
+  preferredSize: Size.fromHeight(78 * ui),
   child: SafeArea(
     bottom: false,
     child: Container(
@@ -1458,146 +1506,139 @@ appBar: PreferredSize(
         color: Color(0xFF17132C),
         boxShadow: [BoxShadow(color: Color(0x66000000), blurRadius: 18, offset: Offset(0, 10))],
       ),
-      padding: EdgeInsets.symmetric(horizontal: 8 * ui, vertical: 7 * ui),
+      padding: EdgeInsets.symmetric(horizontal: 8 * ui, vertical: 8 * ui),
       child: LayoutBuilder(
         builder: (context, c) {
-          // Two-stage compactness to guarantee fit on all Android widths
-          final compact = c.maxWidth < 460 * ui;
-          final ultra = c.maxWidth < 400 * ui;
+          final compact = c.maxWidth < 420 * ui;
+          final ultra = c.maxWidth < 360 * ui;
 
-          final swapW = ultra ? (120 * ui) : (compact ? (135 * ui) : (165 * ui));
-          final adW = ultra ? (128 * ui) : (compact ? (145 * ui) : (180 * ui));
-          final gap = ultra ? (3 * ui) : (compact ? (5 * ui) : (8 * ui));
+          final btnScale = ultra ? 0.68 : (compact ? 0.74 : 0.80);
+          final swapW = ultra ? (118 * ui) : (compact ? (132 * ui) : (165 * ui));
+          final adW = ultra ? (124 * ui) : (compact ? (140 * ui) : (180 * ui));
+          final gap = ultra ? (4 * ui) : (compact ? (6 * ui) : (10 * ui));
 
-          final statsScale = ultra ? 0.86 : (compact ? 0.92 : 1.0);
-          final btnScale = ultra ? 0.70 : (compact ? 0.76 : 0.80);
-
-          Widget fixedWidth(Widget child, double w) =>
+          Widget fixedW(Widget child, double w) =>
               SizedBox(width: w, child: FittedBox(fit: BoxFit.scaleDown, child: child));
 
+          final swapBtn = fixedW(
+            Transform.scale(
+              scale: btnScale,
+              alignment: Alignment.center,
+              child: hudBtn(
+                icon: swapMode ? Icons.close : Icons.swap_horiz,
+                title: 'SWAP',
+                sub: ultra
+                    ? '$swaps'
+                    : (lang == AppLang.tr ? 'Kalan: $swaps' : 'Left: $swaps'),
+                accent: const Color(0xFF39FF14),
+                onTap: (swaps > 0 && !isBusy)
+                    ? () {
+                        setState(() {
+                          swapMode = !swapMode;
+                          if (!swapMode) swapFirst = null;
+                        });
+                        _saveProgress();
+                      }
+                    : null,
+              ),
+            ),
+            swapW,
+          );
+
+          final adBtn = fixedW(
+            Transform.scale(
+              scale: btnScale,
+              alignment: Alignment.center,
+              child: hudBtn(
+                icon: Icons.play_circle_fill,
+                title: ultra ? '+1' : '+1 SWAP',
+                sub: ultra ? (lang == AppLang.tr ? 'Ad' : 'Ad') : (lang == AppLang.tr ? 'Reklam' : 'Ad'),
+                accent: const Color(0xFFFFD24A),
+                onTap: !isBusy
+                    ? () async {
+                        final ready = await adService.isAdReady();
+                        if (!ready) await adService.loadAd();
+                        await adService.showAd(onReward: () {
+                          setState(() => swaps++);
+                          _saveProgress();
+                        });
+                      }
+                    : null,
+              ),
+            ),
+            adW,
+          );
+
+          final restartBtn = SizedBox(
+            width: (ultra ? 38 : 46) * ui,
+            child: IconButton(
+              tooltip: lang == AppLang.tr ? 'Yeniden Başlat' : 'Restart',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              onPressed: () {
+                _startLevel(levelIdx, hardReset: true);
+                _rebuildValueColorMapFromGrid();
+              },
+              icon: const Icon(Icons.restart_alt),
+              iconSize: (ultra ? 22 : 24) * ui,
+            ),
+          );
+
+          final settingsBtn = SizedBox(
+            width: (ultra ? 38 : 46) * ui,
+            child: PopupMenuButton<String>(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              icon: const Icon(Icons.settings),
+              iconSize: (ultra ? 22 : 24) * ui,
+              onSelected: (v) async {
+                setState(() {
+                  if (v == 'lang_tr') lang = AppLang.tr;
+                  if (v == 'lang_en') lang = AppLang.en;
+                  if (v == 'sfx') sfxOn = !sfxOn;
+                  if (v == 'fx_low') fxMode = FxMode.low;
+                  if (v == 'fx_high') fxMode = FxMode.high;
+                });
+                await _saveProgress();
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
+                PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),
+                const PopupMenuDivider(),
+                PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
+                PopupMenuItem(value: 'fx_high', child: Text('${t('fx')}: ${t('high')}')),
+                PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),
+              ],
+            ),
+          );
+
+          if (ultra) {
+            // 2-row layout: guarantees zero overflow
+            return Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [swapBtn, SizedBox(width: gap), adBtn],
+                ),
+                SizedBox(height: 6 * ui),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [restartBtn, settingsBtn],
+                ),
+              ],
+            );
+          }
+
           return Row(
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              // LEFT: Stats (scaled down + scrollable)
-              Expanded(
-                child: Transform.scale(
-                  scale: statsScale,
-                  alignment: Alignment.centerLeft,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    child: Row(
-                      children: [
-                        statChip(t('score'), '$score', accent: const Color(0xFF39FF14)),
-                        SizedBox(width: 8 * ui),
-                        statChip(t('max'), shortNumBig(_maxTileBig()), accent: const Color(0xFF40C4FF)),
-                        SizedBox(width: 8 * ui),
-                        statChip(t('target'), shortNumBig(lv.targetBig), accent: const Color(0xFFFF4DFF)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+              swapBtn,
               SizedBox(width: gap),
-
-              // RIGHT: Buttons (scaled down + fixed widths)
-              fixedWidth(
-                Transform.scale(
-                  scale: btnScale,
-                  alignment: Alignment.center,
-                  child: hudBtn(
-                    icon: swapMode ? Icons.close : Icons.swap_horiz,
-                    title: 'SWAP',
-                    sub: ultra
-                        ? '$swaps'
-                        : (compact
-                            ? (lang == AppLang.tr ? '$swaps' : '$swaps')
-                            : (lang == AppLang.tr ? 'Kalan: $swaps' : 'Left: $swaps')),
-                    accent: const Color(0xFF39FF14),
-                    onTap: (swaps > 0 && !isBusy)
-                        ? () {
-                            setState(() {
-                              swapMode = !swapMode;
-                              if (!swapMode) swapFirst = null;
-                            });
-                            _saveProgress();
-                          }
-                        : null,
-                  ),
-                ),
-                swapW,
-              ),
+              adBtn,
               SizedBox(width: gap),
-              fixedWidth(
-                Transform.scale(
-                  scale: btnScale,
-                  alignment: Alignment.center,
-                  child: hudBtn(
-                    icon: Icons.play_circle_fill,
-                    title: ultra ? '+1' : '+1 SWAP',
-                    sub: ultra
-                        ? (lang == AppLang.tr ? 'Ad' : 'Ad')
-                        : (compact
-                            ? (lang == AppLang.tr ? 'Reklam' : 'Ad')
-                            : (lang == AppLang.tr ? 'Reklam izle' : 'Watch ad')),
-                    accent: const Color(0xFFFFD24A),
-                    onTap: !isBusy
-                        ? () async {
-                            final ready = await adService.isAdReady();
-                            if (!ready) await adService.loadAd();
-                            await adService.showAd(onReward: () {
-                              setState(() => swaps++);
-                              _saveProgress();
-                            });
-                          }
-                        : null,
-                  ),
-                ),
-                adW,
-              ),
-              SizedBox(width: gap),
-
-              // Icons: force compact padding and size
-              SizedBox(
-                width: (ultra ? 36 : 44) * ui,
-                child: IconButton(
-                  tooltip: lang == AppLang.tr ? 'Yeniden Başlat' : 'Restart',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  onPressed: () {
-                    _startLevel(levelIdx, hardReset: true);
-                    _rebuildValueColorMapFromGrid();
-                  },
-                  icon: const Icon(Icons.restart_alt),
-                  iconSize: (ultra ? 22 : 24) * ui,
-                ),
-              ),
-              SizedBox(
-                width: (ultra ? 36 : 44) * ui,
-                child: PopupMenuButton<String>(
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  icon: const Icon(Icons.settings),
-                  iconSize: (ultra ? 22 : 24) * ui,
-                  onSelected: (v) async {
-                    setState(() {
-                      if (v == 'lang_tr') lang = AppLang.tr;
-                      if (v == 'lang_en') lang = AppLang.en;
-                      if (v == 'sfx') sfxOn = !sfxOn;
-                      if (v == 'fx_low') fxMode = FxMode.low;
-                      if (v == 'fx_high') fxMode = FxMode.high;
-                    });
-                    await _saveProgress();
-                  },
-                  itemBuilder: (_) => [
-                    PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
-                    PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),
-                    const PopupMenuDivider(),
-                    PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
-                    PopupMenuItem(value: 'fx_high', child: Text('${t('fx')}: ${t('high')}')),
-                    PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),
-                  ],
-                ),
-              ),
+              restartBtn,
+              settingsBtn,
             ],
           );
         },
@@ -1615,12 +1656,13 @@ body: SafeArea(
             // Neon çizgi + 3 premium blok göstergesi (min / max / next)
             /* mini HUD moved to overlay */
             // 3D mini HUD overlay (minimal height)
-            IgnorePointer(child: _buildTopMiniHud(ui)),
-            SizedBox(height: 10 * ui),
-
+            
                         // Board: maksimum alan (sağ/sol panel ve banner yok)
             Expanded(
-              child: LayoutBuilder(
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: LayoutBuilder(
                 builder: (context, c) {
                   final usableW = c.maxWidth;
                   final usableH = c.maxHeight;
@@ -1637,8 +1679,20 @@ body: SafeArea(
                     ),
                   );
                 },
-              ),
-            ),
+
+  ),
+      ),
+      Positioned(
+        top: 6 * ui,
+        left: 0,
+        right: 0,
+        child: IgnorePointer(
+          child: _buildTopMiniHud(ui),
+        ),
+      ),
+    ],
+  ),
+),
           ],
         ),
       ),
@@ -1652,6 +1706,17 @@ body: SafeArea(
   
 
 
+void _maybePulseHud(int a, int b, int c) {
+  if (a != _hudMinPrev || b != _hudMaxPrev || c != _hudNextPrev) {
+    _hudMinPrev = a;
+    _hudMaxPrev = b;
+    _hudNextPrev = c;
+    if (mounted) {
+      hudPulseCtrl.forward(from: 0);
+    }
+  }
+}
+
 Widget _buildTopMiniHud(double ui) {
   int minV = 0, maxV = 0;
   for (final row in grid) {
@@ -1662,88 +1727,161 @@ Widget _buildTopMiniHud(double ui) {
     }
   }
   final nextV = maxV <= 0 ? 2 : maxV * 2;
+  if (minV == 0) minV = 2;
+  if (maxV == 0) maxV = 2;
 
-  Widget glassTile(String label, int value, {required Color accent}) {
-    final base = _tileColor(value);
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 8 * ui),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16 * ui),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            base.withOpacity(0.90),
-            base.withOpacity(0.58),
-            const Color(0xFF0B0A16).withOpacity(0.70),
-          ],
-        ),
-        border: Border.all(color: Colors.white.withOpacity(0.18)),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 18, offset: const Offset(0, 10)),
-          BoxShadow(color: accent.withOpacity(0.20), blurRadius: 20, offset: const Offset(0, 10)),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 10 * ui,
-            height: 10 * ui,
-            decoration: BoxDecoration(
-              color: accent.withOpacity(0.95),
-              shape: BoxShape.circle,
-              boxShadow: [BoxShadow(color: accent.withOpacity(0.55), blurRadius: 10)],
+  // Trigger pulse on value changes (safe: no setState)
+  WidgetsBinding.instance.addPostFrameCallback((_) => _maybePulseHud(minV, maxV, nextV));
+
+  final tileSize = 56 * ui; // smaller
+  final radius = 14 * ui;
+  final gap = 10 * ui;
+  final wireW = 34 * ui;
+
+  Widget squareTile(String label, int value, Color base, Color accent) {
+    return AnimatedBuilder(
+      animation: hudPulseAnim,
+      builder: (_, __) {
+        final pulse = (hudPulseAnim.value);
+        final glow = 0.12 + 0.22 * pulse;
+        return Container(
+          width: tileSize,
+          height: tileSize,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(radius),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                base.withOpacity(0.95),
+                base.withOpacity(0.65),
+              ],
             ),
+            border: Border.all(color: Colors.white.withOpacity(0.14)),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 16, offset: const Offset(0, 10)),
+              BoxShadow(color: accent.withOpacity(glow), blurRadius: 22, offset: const Offset(0, 10)),
+            ],
           ),
-          SizedBox(width: 8 * ui),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Stack(
             children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.92),
-                  fontWeight: FontWeight.w900,
-                  fontSize: 10.5 * ui,
+              // glossy highlight
+              Positioned(
+                left: 6 * ui,
+                top: 6 * ui,
+                right: 6 * ui,
+                child: Container(
+                  height: 10 * ui,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10 * ui),
+                    color: Colors.white.withOpacity(0.10),
+                  ),
                 ),
               ),
-              SizedBox(height: 2 * ui),
-              Text(
-                shortNumInt(value),
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15.0 * ui,
-                  shadows: [Shadow(color: Colors.black.withOpacity(0.55), blurRadius: 6)],
+
+              // electric shimmer overlay
+              Positioned.fill(
+                child: Opacity(
+                  opacity: 0.10 + 0.18 * pulse,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(radius),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          accent.withOpacity(0.0),
+                          accent.withOpacity(0.22),
+                          accent.withOpacity(0.0),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8 * ui, vertical: 7 * ui),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.92),
+                        fontWeight: FontWeight.w900,
+                        fontSize: 9.6 * ui,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      shortNumInt(value),
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16.0 * ui,
+                        shadows: [Shadow(color: Colors.black.withOpacity(0.55), blurRadius: 6)],
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-        ],
+        );
+      },
+    );
+  }
+
+  Widget wire(Color color) {
+    return SizedBox(
+      width: wireW,
+      height: tileSize,
+      child: AnimatedBuilder(
+        animation: electricCtrl,
+        builder: (_, __) {
+          return CustomPaint(
+            painter: _ElectricLinePainter(electricCtrl.value, color),
+          );
+        },
       ),
     );
   }
 
+  // distinct colors always different
+  final cMin = const Color(0xFF24C36A);
+  final cMax = const Color(0xFF3B6DFF);
+  final cNext = const Color(0xFFFFC94A);
+
+  final bMin = const Color(0xFF0E4B2D);
+  final bMax = const Color(0xFF14214B);
+  final bNext = const Color(0xFF4B2E0E);
+
   return Align(
     alignment: Alignment.topCenter,
     child: Container(
-      padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 6 * ui),
+      padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 8 * ui),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22 * ui),
-        color: const Color(0xFF0B0A16).withOpacity(0.35),
+        borderRadius: BorderRadius.circular(20 * ui),
+        color: const Color(0xFF0B0A16).withOpacity(0.28),
         border: Border.all(color: Colors.white.withOpacity(0.10)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 18, offset: const Offset(0, 10))],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.28), blurRadius: 16, offset: const Offset(0, 10))],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          glassTile(lang == AppLang.tr ? 'EN DÜŞÜK' : 'MIN', minV == 0 ? 2 : minV, accent: const Color(0xFF39FF14)),
-          SizedBox(width: 8 * ui),
-          glassTile(lang == AppLang.tr ? 'MEVCUT MAX' : 'MAX', maxV == 0 ? 2 : maxV, accent: const Color(0xFF40C4FF)),
-          SizedBox(width: 8 * ui),
-          glassTile(lang == AppLang.tr ? 'SONRAKİ' : 'NEXT', nextV, accent: const Color(0xFFFFD24A)),
+          squareTile(lang == AppLang.tr ? 'MIN' : 'MIN', minV, bMin, cMin),
+          SizedBox(width: gap),
+          wire(cMin),
+          SizedBox(width: gap),
+          squareTile(lang == AppLang.tr ? 'MAX' : 'MAX', maxV, bMax, cMax),
+          SizedBox(width: gap),
+          wire(cMax),
+          SizedBox(width: gap),
+          squareTile(lang == AppLang.tr ? 'NEXT' : 'NEXT', nextV, bNext, cNext),
         ],
       ),
     ),
