@@ -1448,8 +1448,9 @@ Widget build(BuildContext context) {
     // Üst panel: sadece Skor / En Büyük / Hedef + Swap + Reklam butonları
     
 
+
 appBar: PreferredSize(
-  preferredSize: Size.fromHeight(72 * ui),
+  preferredSize: Size.fromHeight(70 * ui),
   child: SafeArea(
     bottom: false,
     child: Container(
@@ -1457,51 +1458,60 @@ appBar: PreferredSize(
         color: Color(0xFF17132C),
         boxShadow: [BoxShadow(color: Color(0x66000000), blurRadius: 18, offset: Offset(0, 10))],
       ),
-      padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 8 * ui),
+      padding: EdgeInsets.symmetric(horizontal: 8 * ui, vertical: 7 * ui),
       child: LayoutBuilder(
         builder: (context, c) {
-          // Compact mode for small widths (ensures no overflow on all Android phones)
-          final compact = c.maxWidth < 420 * ui;
+          // Two-stage compactness to guarantee fit on all Android widths
+          final compact = c.maxWidth < 460 * ui;
+          final ultra = c.maxWidth < 400 * ui;
 
-          final swapW = compact ? (140 * ui) : (170 * ui);
-          final adW = compact ? (150 * ui) : (185 * ui);
-          final gap = compact ? (4 * ui) : (8 * ui);
+          final swapW = ultra ? (120 * ui) : (compact ? (135 * ui) : (165 * ui));
+          final adW = ultra ? (128 * ui) : (compact ? (145 * ui) : (180 * ui));
+          final gap = ultra ? (3 * ui) : (compact ? (5 * ui) : (8 * ui));
+
+          final statsScale = ultra ? 0.86 : (compact ? 0.92 : 1.0);
+          final btnScale = ultra ? 0.70 : (compact ? 0.76 : 0.80);
 
           Widget fixedWidth(Widget child, double w) =>
               SizedBox(width: w, child: FittedBox(fit: BoxFit.scaleDown, child: child));
 
           return Row(
             children: [
-              // LEFT: Stats - always flexible and scrollable
+              // LEFT: Stats (scaled down + scrollable)
               Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  physics: const BouncingScrollPhysics(),
-                  child: Row(
-                    children: [
-                      statChip(t('score'), '$score', accent: const Color(0xFF39FF14)),
-                      SizedBox(width: 10 * ui),
-                      statChip(t('max'), shortNumBig(_maxTileBig()), accent: const Color(0xFF40C4FF)),
-                      SizedBox(width: 10 * ui),
-                      statChip(t('target'), shortNumBig(lv.targetBig), accent: const Color(0xFFFF4DFF)),
-                    ],
+                child: Transform.scale(
+                  scale: statsScale,
+                  alignment: Alignment.centerLeft,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: Row(
+                      children: [
+                        statChip(t('score'), '$score', accent: const Color(0xFF39FF14)),
+                        SizedBox(width: 8 * ui),
+                        statChip(t('max'), shortNumBig(_maxTileBig()), accent: const Color(0xFF40C4FF)),
+                        SizedBox(width: 8 * ui),
+                        statChip(t('target'), shortNumBig(lv.targetBig), accent: const Color(0xFFFF4DFF)),
+                      ],
+                    ),
                   ),
                 ),
               ),
               SizedBox(width: gap),
 
-              // RIGHT: Actions - fixed widths so it never overflows
+              // RIGHT: Buttons (scaled down + fixed widths)
               fixedWidth(
                 Transform.scale(
-                  scaleX: 0.8,
-                  scaleY: 1.0,
+                  scale: btnScale,
                   alignment: Alignment.center,
                   child: hudBtn(
                     icon: swapMode ? Icons.close : Icons.swap_horiz,
                     title: 'SWAP',
-                    sub: compact
-                        ? (lang == AppLang.tr ? '$swaps' : '$swaps')
-                        : (lang == AppLang.tr ? 'Kalan: $swaps' : 'Left: $swaps'),
+                    sub: ultra
+                        ? '$swaps'
+                        : (compact
+                            ? (lang == AppLang.tr ? '$swaps' : '$swaps')
+                            : (lang == AppLang.tr ? 'Kalan: $swaps' : 'Left: $swaps')),
                     accent: const Color(0xFF39FF14),
                     onTap: (swaps > 0 && !isBusy)
                         ? () {
@@ -1516,20 +1526,19 @@ appBar: PreferredSize(
                 ),
                 swapW,
               ),
-
               SizedBox(width: gap),
-
               fixedWidth(
                 Transform.scale(
-                  scaleX: 0.8,
-                  scaleY: 1.0,
+                  scale: btnScale,
                   alignment: Alignment.center,
                   child: hudBtn(
                     icon: Icons.play_circle_fill,
-                    title: '+1 SWAP',
-                    sub: compact
-                        ? (lang == AppLang.tr ? 'Reklam' : 'Ad')
-                        : (lang == AppLang.tr ? 'Reklam izle' : 'Watch ad'),
+                    title: ultra ? '+1' : '+1 SWAP',
+                    sub: ultra
+                        ? (lang == AppLang.tr ? 'Ad' : 'Ad')
+                        : (compact
+                            ? (lang == AppLang.tr ? 'Reklam' : 'Ad')
+                            : (lang == AppLang.tr ? 'Reklam izle' : 'Watch ad')),
                     accent: const Color(0xFFFFD24A),
                     onTap: !isBusy
                         ? () async {
@@ -1545,29 +1554,30 @@ appBar: PreferredSize(
                 ),
                 adW,
               ),
-
               SizedBox(width: gap),
 
-              // Icons are always visible
+              // Icons: force compact padding and size
               SizedBox(
-                width: (compact ? 42 : 48) * ui,
+                width: (ultra ? 36 : 44) * ui,
                 child: IconButton(
                   tooltip: lang == AppLang.tr ? 'Yeniden Başlat' : 'Restart',
                   padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                   onPressed: () {
                     _startLevel(levelIdx, hardReset: true);
                     _rebuildValueColorMapFromGrid();
                   },
                   icon: const Icon(Icons.restart_alt),
-                  iconSize: 24 * ui,
+                  iconSize: (ultra ? 22 : 24) * ui,
                 ),
               ),
-
               SizedBox(
-                width: (compact ? 42 : 48) * ui,
+                width: (ultra ? 36 : 44) * ui,
                 child: PopupMenuButton<String>(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                   icon: const Icon(Icons.settings),
-                  iconSize: 24 * ui,
+                  iconSize: (ultra ? 22 : 24) * ui,
                   onSelected: (v) async {
                     setState(() {
                       if (v == 'lang_tr') lang = AppLang.tr;
