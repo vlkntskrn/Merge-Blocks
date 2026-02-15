@@ -12,47 +12,23 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // --------------------
 // DartPad uyumlu basit kalıcı hafıza (SharedPreferences yerine).
 // Flutter uygulamada gerçek SharedPreferences kullanmak istersen,
 // bu sınıfı kaldırıp tekrar shared_preferences paketini ekleyebilirsin.
 // --------------------
-class SimplePrefs {
-  static final Map<String, Object> _mem = <String, Object>{};
-  SimplePrefs._();
 
-  static Future<SimplePrefs> getInstance() async => SimplePrefs._();
+class AppPrefs {
+  static SharedPreferences? _p;
+  AppPrefs._();
 
-  int? getInt(String key) => _mem[key] is int ? _mem[key] as int : null;
-  bool? getBool(String key) => _mem[key] is bool ? _mem[key] as bool : null;
-  String? getString(String key) => _mem[key] is String ? _mem[key] as String : null;
-  List<String>? getStringList(String key) =>
-      _mem[key] is List<String> ? List<String>.from(_mem[key] as List) : null;
-
-  Future<bool> setInt(String key, int value) async {
-    _mem[key] = value;
-    return true;
-  }
-
-  Future<bool> setBool(String key, bool value) async {
-    _mem[key] = value;
-    return true;
-  }
-
-  Future<bool> setString(String key, String value) async {
-    _mem[key] = value;
-    return true;
-  }
-
-  Future<bool> setStringList(String key, List<String> value) async {
-    _mem[key] = List<String>.from(value);
-    return true;
+  static Future<SharedPreferences> getInstance() async {
+    _p ??= await SharedPreferences.getInstance();
+    return _p!;
   }
 }
-
-
-
 class BlockerCrackPainter extends CustomPainter {
   final int hp;
   BlockerCrackPainter(this.hp);
@@ -260,7 +236,7 @@ class UltraGamePage extends StatefulWidget {
   State<UltraGamePage> createState() => _UltraGamePageState();
 }
 
-class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateMixin {
+class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateMixin, WidgetsBindingObserver {
   // === Stable unique colors by tile VALUE ===
   final Map<int, int> _valueColorIndex = {}; // value -> palette index
   static const List<Color> _valuePalette = [
@@ -417,6 +393,7 @@ int? _pendingDuplicateValue;
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     glowCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 860))..repeat(reverse: true);
     glowAnim = Tween<double>(begin: 0.24, end: 0.92).animate(CurvedAnimation(parent: glowCtrl, curve: Curves.easeInOut));
     energyCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
@@ -426,8 +403,7 @@ int? _pendingDuplicateValue;
     adService.initialize();
     mode = GameMode.endless;
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-    // removed forced reset to preserve saved state
-
+    
     _loadProgress();
   }
 
@@ -436,8 +412,19 @@ int? _pendingDuplicateValue;
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     glowCtrl.dispose();
     energyCtrl.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
+
+
+@override
+void didChangeAppLifecycleState(AppLifecycleState state) {
+  if (state == AppLifecycleState.paused ||
+      state == AppLifecycleState.inactive ||
+      state == AppLifecycleState.detached) {
+    _saveProgress();
+  }
+}
 
   // ---------- Level Generation ----------
   LevelConfig _generateCampaignLevel(int n) {
@@ -659,60 +646,59 @@ int? _pendingDuplicateValue;
 
   // ---------- Persistence ----------
   Future<void> _loadProgress() async {
-    final p = await SimplePrefs.getInstance();
-    setState(() {
-      levelIdx = (p.getInt(_kLevel) ?? 0).clamp(0, 999999).toInt();
-      unlockedCampaign = (p.getInt(_kUnlocked) ?? 1).clamp(1, 100).toInt();
-      best = p.getInt(_kBest) ?? 0;
-      swaps = p.getInt(_kSwaps) ?? 0;
-      lang = (p.getString(_kLang) ?? 'tr') == 'en' ? AppLang.en : AppLang.tr;
-      numFmt = (p.getString(_kNumFmt) ?? 'tr') == 'en' ? NumFmt.en : NumFmt.tr;
-      sfxOn = p.getBool(_kSfx) ?? true;
-      fxMode = (p.getString(_kFx) ?? 'high') == 'low' ? FxMode.low : FxMode.high;
-      testMode = p.getBool(_kTest) ?? false;
-      mode = GameMode.endless;
-      if (levelIdx < 100) levelIdx = 100;
-    
-  });
+  final p = await AppPrefs.getInstance();
+
+  levelIdx = (p.getInt(_kLevel) ?? 100).clamp(0, 999999);
+  unlockedCampaign = (p.getInt(_kUnlocked) ?? 1).clamp(1, 100);
+  best = p.getInt(_kBest) ?? 0;
+  swaps = p.getInt(_kSwaps) ?? 0;
+
+  lang = (p.getString(_kLang) ?? 'tr') == 'en' ? AppLang.en : AppLang.tr;
+  numFmt = (p.getString(_kNumFmt) ?? 'tr') == 'en' ? NumFmt.en : NumFmt.tr;
+  sfxOn = p.getBool(_kSfx) ?? true;
+  fxMode = (p.getString(_kFx) ?? 'high') == 'low' ? FxMode.low : FxMode.high;
+  testMode = p.getBool(_kTest) ?? false;
+
+  mode = GameMode.endless;
+  if (levelIdx < 100) levelIdx = 100;
 
   final v = p.getStringList(_kGridV) ?? const <String>[];
   final b = p.getStringList(_kGridB) ?? const <String>[];
   final f = p.getStringList(_kGridF) ?? const <String>[];
   final hasSnap = v.length == rows * cols && b.length == rows * cols && f.length == rows * cols;
 
-  _startLevel(levelIdx, hardReset: false);
+  if (!hasSnap) {
+    _startLevel(levelIdx, hardReset: false);
+    _rebuildValueColorMapFromGrid();
+    if (mounted) setState(() {});
+    return;
+  }
 
-  if (hasSnap) {
-    // restore counters
-    score = p.getInt(_kScore) ?? score;
-    moves = p.getInt(_kMoves) ?? moves;
-    blockersRemaining = p.getInt(_kBlockersRem) ?? blockersRemaining;
-    _lastMaxAdTriggered = p.getInt(_kLastMaxAd) ?? 0;
-    final pd = p.getInt(_kPendingDup) ?? 0;
-    _pendingDuplicateValue = (pd > 0) ? pd : null;
+  score = p.getInt(_kScore) ?? 0;
+  moves = p.getInt(_kMoves) ?? 0;
+  blockersRemaining = p.getInt(_kBlockersRem) ?? 0;
+  _lastMaxAdTriggered = p.getInt(_kLastMaxAd) ?? 0;
+  final pd = p.getInt(_kPendingDup) ?? 0;
+  _pendingDuplicateValue = (pd > 0) ? pd : null;
 
-    // restore grid
-    int k = 0;
-    for (int r = 0; r < rows; r++) {
-      for (int c = 0; c < cols; c++) {
-        final cell = grid[r][c];
-        cell.value = int.tryParse(v[k]) ?? 0;
-        cell.blocked = b[k] == '1';
-        cell.frozen = f[k] == '1';
-        k++;
-      }
+  int k = 0;
+  for (int r = 0; r < rows; r++) {
+    for (int c = 0; c < cols; c++) {
+      final cell = grid[r][c];
+      cell.value = int.tryParse(v[k]) ?? 0;
+      cell.blocked = b[k] == '1';
+      cell.frozen = f[k] == '1';
+      if (cell.blocked && cell.blockerHp <= 0) cell.blockerHp = 3;
+      k++;
     }
   }
 
-  if (!hasSnap) {
-    _startLevel(levelIdx, hardReset: false);
-  }
   _rebuildValueColorMapFromGrid();
-  setState(() {});
+  if (mounted) setState(() {});
 }
 
   Future<void> _saveProgress() async {
-    final p = await SimplePrefs.getInstance();
+    final p = await AppPrefs.getInstance();
     await p.setInt(_kLevel, levelIdx);
     await p.setInt(_kUnlocked, unlockedCampaign);
     await p.setInt(_kBest, best);
@@ -750,7 +736,7 @@ await p.setStringList(_kGridF, f);
   }
 
   Future<List<LeaderboardEntry>> _loadLocalLb() async {
-    final p = await SimplePrefs.getInstance();
+    final p = await AppPrefs.getInstance();
     final raw = p.getStringList(_kLb) ?? [];
     return raw.map((e) {
       final s = e.split('|');
@@ -765,7 +751,7 @@ await p.setStringList(_kGridF, f);
   }
 
   Future<void> _saveLocalLb(List<LeaderboardEntry> list) async {
-    final p = await SimplePrefs.getInstance();
+    final p = await AppPrefs.getInstance();
     final raw = list
         .map((e) => '${e.name}|${e.score}|${e.level}|${e.date.toIso8601String()}|${e.mode == GameMode.endless ? 'endless' : 'campaign'}')
         .toList();
@@ -1297,7 +1283,7 @@ void _applyPendingDuplicateIfAny() {
 
   Future<void> _maybeShowBlockerTooltip() async {
     if (lv.goalType != GoalType.clearBlockers && lv.blockerCount <= 0) return;
-    final p = await SimplePrefs.getInstance();
+    final p = await AppPrefs.getInstance();
     final seen = p.getBool(_kBlockerTipSeen) ?? false;
     if (seen) return;
     showBlockerTip = true;
@@ -1393,16 +1379,6 @@ Widget build(BuildContext context) {
   // Daha okunaklı: küçük ekranlarda bile büyük HUD (A52 dahil).
   final ui = (size.shortestSide / 360.0).clamp(1.40, 2.20);
 
-  // Board min/max/next
-  int minV = 0, maxV = 0;
-  for (final row in grid) {
-    for (final c in row) {
-      if (c.value <= 0) continue;
-      if (minV == 0 || c.value < minV) minV = c.value;
-      if (c.value > maxV) maxV = c.value;
-    }
-  }
-  final nextV = maxV <= 0 ? 2 : maxV * 2;
 
   Widget statChip(String label, String value, {required Color accent}) {
     return Container(
@@ -1465,172 +1441,134 @@ Widget build(BuildContext context) {
     );
   }
 
-  Widget premiumMiniTile(int value) {
-    final c = _tileColor(value);
-    return Container(
-      width: 46 * ui,
-      height: 46 * ui,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12 * ui),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [c.withOpacity(0.88), c.withOpacity(0.58)],
-        ),
-        border: Border.all(color: Colors.white.withOpacity(0.16)),
-        boxShadow: [BoxShadow(color: c.withOpacity(0.22), blurRadius: 16, offset: const Offset(0, 10))],
-      ),
-      child: Center(
-        child: Text(
-          shortNumInt(value),
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14 * ui),
-        ),
-      ),
-    );
-  }
 
   return Scaffold(
     backgroundColor: const Color(0xFF0B0A16),
 
     // Üst panel: sadece Skor / En Büyük / Hedef + Swap + Reklam butonları
-    appBar: PreferredSize(
-      preferredSize: Size.fromHeight(78 * ui), // daha kompakt (%20 küçültülmüş hissi)
-      child: SafeArea(
-        bottom: false,
-        child: Container(
-          decoration: const BoxDecoration(
-            color: Color(0xFF17132C),
-            boxShadow: [BoxShadow(color: Color(0x66000000), blurRadius: 18, offset: Offset(0, 10))],
-          ),
-          padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 8 * ui),
-          child: Row(
-            children: [
-              // Sol: 3 etiket
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  physics: const BouncingScrollPhysics(),
-                  child: Row(
-                    children: [
-                      statChip(t('score'), '$score', accent: const Color(0xFF39FF14)),
-                      SizedBox(width: 10 * ui),
-                      statChip(t('max'), shortNumBig(_maxTileBig()), accent: const Color(0xFF40C4FF)),
-                      SizedBox(width: 10 * ui),
-                      statChip(t('target'), shortNumBig(lv.targetBig), accent: const Color(0xFFFF4DFF)),
-                    ],
-                  ),
-                ),
-              ),
-              SizedBox(width: 10 * ui),
-
-              // Sağ: Swap + Reklam
-              Transform.scale(
-                scaleX: 0.8,
-                scaleY: 1.0,
-                alignment: Alignment.center,
-                child: hudBtn(
-                icon: swapMode ? Icons.close : Icons.swap_horiz,
-                title: 'SWAP',
-                sub: (lang == AppLang.tr) ? 'Kalan: $swaps' : 'Left: $swaps',
-                accent: const Color(0xFF39FF14),
-                onTap: (swaps > 0 && !isBusy)
-                    ? () {
-                        setState(() {
-                          swapMode = !swapMode;
-                          if (!swapMode) swapFirst = null;
-                        });
-                        _saveProgress();
-                      }
-                    : null,
-              ),
-              ),
-              SizedBox(width: 10 * ui),
-              Transform.scale(
-                scaleX: 0.8,
-                scaleY: 1.0,
-                alignment: Alignment.center,
-                child: hudBtn(
-                icon: Icons.play_circle_fill,
-                title: '+1 SWAP',
-                sub: (lang == AppLang.tr) ? 'Reklam izle' : 'Watch ad',
-                accent: const Color(0xFFFFD24A),
-                onTap: !isBusy
-                    ? () async {
-                        final ready = await adService.isAdReady();
-                        if (!ready) await adService.loadAd();
-                        await adService.showAd(onReward: () {
-                          setState(() => swaps++);
-                          _saveProgress();
-                        });
-                      }
-                    : null,
-              ),
-              ),
-              SizedBox(width: 6 * ui),
-              IconButton(
-                tooltip: lang == AppLang.tr ? 'Yeniden Başlat' : 'Restart',
-                onPressed: () {
-                  _startLevel(levelIdx, hardReset: true);
-                  _rebuildValueColorMapFromGrid();
-                },
-                icon: const Icon(Icons.restart_alt),
-                iconSize: 24 * ui,
-              ),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.settings),
-                iconSize: 24 * ui,
-                onSelected: (v) async {
-                  setState(() {
-                    if (v == 'lang_tr') lang = AppLang.tr;
-                    if (v == 'lang_en') lang = AppLang.en;
-                    if (v == 'sfx') sfxOn = !sfxOn;
-                    if (v == 'fx_low') fxMode = FxMode.low;
-                    if (v == 'fx_high') fxMode = FxMode.high;
-                  });
-                  await _saveProgress();
-                },
-                itemBuilder: (_) => [
-                  PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
-                  PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),
-                  const PopupMenuDivider(),
-                  PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
-                  PopupMenuItem(value: 'fx_high', child: Text('${t('fx')}: ${t('high')}')),
-                  PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),
+    
+appBar: PreferredSize(
+  preferredSize: Size.fromHeight(72 * ui),
+  child: SafeArea(
+    bottom: false,
+    child: Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF17132C),
+        boxShadow: [BoxShadow(color: Color(0x66000000), blurRadius: 18, offset: Offset(0, 10))],
+      ),
+      padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 8 * ui),
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                children: [
+                  statChip(t('score'), '$score', accent: const Color(0xFF39FF14)),
+                  SizedBox(width: 10 * ui),
+                  statChip(t('max'), shortNumBig(_maxTileBig()), accent: const Color(0xFF40C4FF)),
+                  SizedBox(width: 10 * ui),
+                  statChip(t('target'), shortNumBig(lv.targetBig), accent: const Color(0xFFFF4DFF)),
                 ],
               ),
+            ),
+          ),
+          SizedBox(width: 8 * ui),
+
+          Transform.scale(
+            scaleX: 0.8,
+            scaleY: 1.0,
+            alignment: Alignment.center,
+            child: hudBtn(
+              icon: swapMode ? Icons.close : Icons.swap_horiz,
+              title: 'SWAP',
+              sub: (lang == AppLang.tr) ? 'Kalan: $swaps' : 'Left: $swaps',
+              accent: const Color(0xFF39FF14),
+              onTap: (swaps > 0 && !isBusy)
+                  ? () {
+                      setState(() {
+                        swapMode = !swapMode;
+                        if (!swapMode) swapFirst = null;
+                      });
+                      _saveProgress();
+                    }
+                  : null,
+            ),
+          ),
+          SizedBox(width: 6 * ui),
+          Transform.scale(
+            scaleX: 0.8,
+            scaleY: 1.0,
+            alignment: Alignment.center,
+            child: hudBtn(
+              icon: Icons.play_circle_fill,
+              title: '+1 SWAP',
+              sub: (lang == AppLang.tr) ? 'Reklam izle' : 'Watch ad',
+              accent: const Color(0xFFFFD24A),
+              onTap: !isBusy
+                  ? () async {
+                      final ready = await adService.isAdReady();
+                      if (!ready) await adService.loadAd();
+                      await adService.showAd(onReward: () {
+                        setState(() => swaps++);
+                        _saveProgress();
+                      });
+                    }
+                  : null,
+            ),
+          ),
+          SizedBox(width: 2 * ui),
+          IconButton(
+            tooltip: lang == AppLang.tr ? 'Yeniden Başlat' : 'Restart',
+            onPressed: () {
+              _startLevel(levelIdx, hardReset: true);
+              _rebuildValueColorMapFromGrid();
+            },
+            icon: const Icon(Icons.restart_alt),
+            iconSize: 24 * ui,
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.settings),
+            iconSize: 24 * ui,
+            onSelected: (v) async {
+              setState(() {
+                if (v == 'lang_tr') lang = AppLang.tr;
+                if (v == 'lang_en') lang = AppLang.en;
+                if (v == 'sfx') sfxOn = !sfxOn;
+                if (v == 'fx_low') fxMode = FxMode.low;
+                if (v == 'fx_high') fxMode = FxMode.high;
+              });
+              await _saveProgress();
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
+              PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),
+              const PopupMenuDivider(),
+              PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
+              PopupMenuItem(value: 'fx_high', child: Text('${t('fx')}: ${t('high')}')),
+              PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),
             ],
           ),
-        ),
+        ],
       ),
     ),
+  ),
+),
 
-    body: SafeArea(
+body: SafeArea(
       top: false,
       child: Padding(
         padding: EdgeInsets.fromLTRB(10 * ui, 10 * ui, 10 * ui, 12 * ui),
         child: Column(
           children: [
             // Neon çizgi + 3 premium blok göstergesi (min / max / next)
-            Container(
-              height: 2.6 * ui,
-              decoration: BoxDecoration(
-                color: const Color(0xFF39FF14).withOpacity(0.70),
-                borderRadius: BorderRadius.circular(99),
-                boxShadow: [BoxShadow(color: const Color(0xFF39FF14).withOpacity(0.25), blurRadius: 16)],
-              ),
-            ),
+            /* mini HUD moved to overlay */
+            // 3D mini HUD overlay (minimal height)
+            IgnorePointer(child: _buildTopMiniHud(ui)),
             SizedBox(height: 10 * ui),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                premiumMiniTile(minV == 0 ? 2 : minV),
-                premiumMiniTile(maxV == 0 ? 2 : maxV),
-                premiumMiniTile(nextV),
-              ],
-            ),
-            SizedBox(height: 12 * ui),
 
-            // Board: maksimum alan (sağ/sol panel ve banner yok)
+                        // Board: maksimum alan (sağ/sol panel ve banner yok)
             Expanded(
               child: LayoutBuilder(
                 builder: (context, c) {
@@ -1662,6 +1600,106 @@ Widget build(BuildContext context) {
 
 
   
+
+
+Widget _buildTopMiniHud(double ui) {
+  int minV = 0, maxV = 0;
+  for (final row in grid) {
+    for (final c in row) {
+      if (c.value <= 0) continue;
+      if (minV == 0 || c.value < minV) minV = c.value;
+      if (c.value > maxV) maxV = c.value;
+    }
+  }
+  final nextV = maxV <= 0 ? 2 : maxV * 2;
+
+  Widget glassTile(String label, int value, {required Color accent}) {
+    final base = _tileColor(value);
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 8 * ui),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16 * ui),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            base.withOpacity(0.90),
+            base.withOpacity(0.58),
+            const Color(0xFF0B0A16).withOpacity(0.70),
+          ],
+        ),
+        border: Border.all(color: Colors.white.withOpacity(0.18)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 18, offset: const Offset(0, 10)),
+          BoxShadow(color: accent.withOpacity(0.20), blurRadius: 20, offset: const Offset(0, 10)),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 10 * ui,
+            height: 10 * ui,
+            decoration: BoxDecoration(
+              color: accent.withOpacity(0.95),
+              shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: accent.withOpacity(0.55), blurRadius: 10)],
+            ),
+          ),
+          SizedBox(width: 8 * ui),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.92),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 10.5 * ui,
+                ),
+              ),
+              SizedBox(height: 2 * ui),
+              Text(
+                shortNumInt(value),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15.0 * ui,
+                  shadows: [Shadow(color: Colors.black.withOpacity(0.55), blurRadius: 6)],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  return Align(
+    alignment: Alignment.topCenter,
+    child: Container(
+      padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 6 * ui),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22 * ui),
+        color: const Color(0xFF0B0A16).withOpacity(0.35),
+        border: Border.all(color: Colors.white.withOpacity(0.10)),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 18, offset: const Offset(0, 10))],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          glassTile(lang == AppLang.tr ? 'EN DÜŞÜK' : 'MIN', minV == 0 ? 2 : minV, accent: const Color(0xFF39FF14)),
+          SizedBox(width: 8 * ui),
+          glassTile(lang == AppLang.tr ? 'MEVCUT MAX' : 'MAX', maxV == 0 ? 2 : maxV, accent: const Color(0xFF40C4FF)),
+          SizedBox(width: 8 * ui),
+          glassTile(lang == AppLang.tr ? 'SONRAKİ' : 'NEXT', nextV, accent: const Color(0xFFFFD24A)),
+        ],
+      ),
+    ),
+  );
+}
+
 
   Widget _buildBoard(Size boardSize) {
     return GestureDetector(
