@@ -15,56 +15,6 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 
-class _ElectricLinePainter extends CustomPainter {
-  final double t;
-  final Color color;
-  _ElectricLinePainter(this.t, this.color);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final p = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.round
-      ..color = color.withOpacity(0.85);
-
-    final glow = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 6.0
-      ..strokeCap = StrokeCap.round
-      ..color = color.withOpacity(0.22);
-
-    final path = Path();
-    final midY = size.height * 0.5;
-    final startX = 0.0;
-    final endX = size.width;
-
-    // zigzag line
-    const segments = 7;
-    path.moveTo(startX, midY);
-    for (int i = 1; i <= segments; i++) {
-      final x = (endX / segments) * i;
-      final phase = (t * 6.2831) + i * 1.1;
-      final amp = size.height * 0.18;
-      final y = midY + sin(phase) * amp * (i.isEven ? 1.0 : -1.0);
-      path.lineTo(x, y);
-    }
-
-    canvas.drawPath(path, glow);
-    canvas.drawPath(path, p);
-
-    // moving spark
-    final sparkX = (endX * (t % 1.0));
-    final spark = Paint()..color = color.withOpacity(0.95);
-    canvas.drawCircle(Offset(sparkX, midY), 3.2, spark);
-    canvas.drawCircle(Offset(sparkX, midY), 7.0, spark..color = color.withOpacity(0.18));
-  }
-
-  @override
-  bool shouldRepaint(covariant _ElectricLinePainter oldDelegate) =>
-      oldDelegate.t != t || oldDelegate.color != color;
-}
-
 
 // --------------------
 // DartPad uyumlu basit kalıcı hafıza (SharedPreferences yerine).
@@ -441,15 +391,9 @@ int? _pendingDuplicateValue;
 
   late final AnimationController glowCtrl;
   late final Animation<double> glowAnim;
-  
-// Mini HUD electric + pulse animations (min/max/next)
 late AnimationController hudPulseCtrl;
 late Animation<double> hudPulseAnim;
 late AnimationController electricCtrl;
-
-int _hudMinPrev = -1;
-int _hudMaxPrev = -1;
-int _hudNextPrev = -1;
 
 late final AnimationController energyCtrl;
   late final Animation<double> energyAnim;
@@ -1672,35 +1616,23 @@ final adBtn = fixedW(
             ),
           );
 
-          if (ultra) {
-            // 2-row layout: guarantees zero overflow
-            return Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [swapBtn, SizedBox(width: gap), nextChip],
-                ),
-                SizedBox(height: 6 * ui),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [adBtn, SizedBox(width: gap), restartBtn, settingsBtn],
-                ),
-              ],
-            );
-          }
-
-          return Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              swapBtn,
-              SizedBox(width: gap),
-              adBtn,
-              SizedBox(width: gap),
-              restartBtn,
-              settingsBtn,
-            ],
-          );
+// Use Wrap to guarantee zero overflow on all Android widths
+return Align(
+  alignment: Alignment.centerRight,
+  child: Wrap(
+    alignment: WrapAlignment.end,
+    crossAxisAlignment: WrapCrossAlignment.center,
+    spacing: gap,
+    runSpacing: 6 * ui,
+    children: [
+      swapBtn,
+      nextChip,
+      adBtn,
+      restartBtn,
+      settingsBtn,
+    ],
+  ),
+);
         },
       ),
     ),
@@ -1745,199 +1677,10 @@ body: SafeArea(
   );
 }
 
-
-
-
-  
-
-
-void _maybePulseHud(int a, int b, int c) {
-  if (a != _hudMinPrev || b != _hudMaxPrev || c != _hudNextPrev) {
-    _hudMinPrev = a;
-    _hudMaxPrev = b;
-    _hudNextPrev = c;
-    if (mounted) {
-      hudPulseCtrl.forward(from: 0);
-    }
-  }
-}
-
-Widget _buildTopMiniHud(double ui) {
-  int minV = 0, maxV = 0;
-  for (final row in grid) {
-    for (final c in row) {
-      if (c.value <= 0) continue;
-      if (minV == 0 || c.value < minV) minV = c.value;
-      if (c.value > maxV) maxV = c.value;
-    }
-  }
-  final nextV = maxV <= 0 ? 2 : maxV * 2;
-  if (minV == 0) minV = 2;
-  if (maxV == 0) maxV = 2;
-
-  // Trigger pulse on value changes (safe: no setState)
-  WidgetsBinding.instance.addPostFrameCallback((_) => _maybePulseHud(minV, maxV, nextV));
-
-  final tileSize = 48 * ui; // smaller
-  final radius = 14 * ui;
-  final gap = 10 * ui;
-  final wireW = 28 * ui;
-
-  Widget squareTile(String label, int value, Color base, Color accent) {
-    return AnimatedBuilder(
-      animation: hudPulseAnim,
-      builder: (_, __) {
-        final pulse = (hudPulseAnim.value);
-        final glow = 0.12 + 0.22 * pulse;
-        return Container(
-          width: tileSize,
-          height: tileSize,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(radius),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                base.withOpacity(0.95),
-                base.withOpacity(0.65),
-              ],
-            ),
-            border: Border.all(color: Colors.white.withOpacity(0.14)),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 16, offset: const Offset(0, 10)),
-              BoxShadow(color: accent.withOpacity(glow), blurRadius: 22, offset: const Offset(0, 10)),
-            ],
-          ),
-          child: Stack(
-            children: [
-              // glossy highlight
-              Positioned(
-                left: 6 * ui,
-                top: 6 * ui,
-                right: 6 * ui,
-                child: Container(
-                  height: 10 * ui,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10 * ui),
-                    color: Colors.white.withOpacity(0.10),
-                  ),
-                ),
-              ),
-
-              // electric shimmer overlay
-              Positioned.fill(
-                child: Opacity(
-                  opacity: 0.10 + 0.18 * pulse,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(radius),
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          accent.withOpacity(0.0),
-                          accent.withOpacity(0.22),
-                          accent.withOpacity(0.0),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8 * ui, vertical: 7 * ui),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.92),
-                        fontWeight: FontWeight.w900,
-                        fontSize: 9.6 * ui,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      shortNumInt(value),
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 16.0 * ui,
-                        shadows: [Shadow(color: Colors.black.withOpacity(0.55), blurRadius: 6)],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget wire(Color color) {
-    return SizedBox(
-      width: wireW,
-      height: tileSize,
-      child: AnimatedBuilder(
-        animation: electricCtrl,
-        builder: (_, __) {
-          return CustomPaint(
-            painter: _ElectricLinePainter(electricCtrl.value, color),
-          );
-        },
-      ),
-    );
-  }
-
-  // distinct colors always different
-  final cMin = const Color(0xFF24C36A);
-  final cMax = const Color(0xFF3B6DFF);
-  final cNext = const Color(0xFFFFC94A);
-
-  final bMin = const Color(0xFF0E4B2D);
-  final bMax = const Color(0xFF14214B);
-  final bNext = const Color(0xFF4B2E0E);
-
-  return Align(
-    alignment: Alignment.topCenter,
-    child: Container(
-      padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 8 * ui),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20 * ui),
-        color: const Color(0xFF0B0A16).withOpacity(0.28),
-        border: Border.all(color: Colors.white.withOpacity(0.10)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.28), blurRadius: 16, offset: const Offset(0, 10))],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          squareTile(lang == AppLang.tr ? 'MIN' : 'MIN', minV, bMin, cMin),
-          SizedBox(width: gap),
-          wire(cMin),
-          SizedBox(width: gap),
-          squareTile(lang == AppLang.tr ? 'MAX' : 'MAX', maxV, bMax, cMax),
-          SizedBox(width: gap),
-          wire(cMax),
-          SizedBox(width: gap),
-          squareTile(lang == AppLang.tr ? 'NEXT' : 'NEXT', nextV, bNext, cNext),
-        ],
-      ),
-    ),
-  );
-}
-
-
   Widget _buildBoard(Size boardSize) {
     
     _lastBoardSize = boardSize;
-return GestureDetector(
+    return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapDown: (d) async {
         final p = _cellFromLocal(d.localPosition, boardSize);
