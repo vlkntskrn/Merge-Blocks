@@ -1616,24 +1616,38 @@ final adBtn = fixedW(
             ),
           );
 
-// Use Wrap to guarantee zero overflow on all Android widths
-return Align(
-  alignment: Alignment.centerRight,
-  child: Wrap(
-    alignment: WrapAlignment.spaceBetween,
-    crossAxisAlignment: WrapCrossAlignment.center,
-    spacing: gap,
-    runSpacing: 6 * ui,
-    children: [
-      adBtn,
-      swapBtn,
-      nextChip,
-      restartBtn,
-      settingsBtn,
-    ],
-  ),
+
+// Single-line top bar: keep NEXT on the same line by scaling down if needed.
+return Row(
+  children: [
+    Expanded(
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            adBtn,
+            SizedBox(width: gap),
+            swapBtn,
+            SizedBox(width: gap),
+            nextChip,
+          ],
+        ),
+      ),
+    ),
+    SizedBox(width: gap),
+    Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        restartBtn,
+        SizedBox(width: gap),
+        settingsBtn,
+      ],
+    ),
+  ],
 );
-        },
+},
       ),
     ),
   ),
