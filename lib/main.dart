@@ -1381,7 +1381,8 @@ void _applyPendingDuplicateIfAny() {
     return false;
   }
 
-  @override
+  
+@override
 Widget build(BuildContext context) {
   final mq = MediaQuery.of(context);
   final size = mq.size;
@@ -1520,7 +1521,11 @@ Widget build(BuildContext context) {
               SizedBox(width: 10 * ui),
 
               // Sağ: Swap + Reklam
-              hudBtn(
+              Transform.scale(
+                scaleX: 0.8,
+                scaleY: 1.0,
+                alignment: Alignment.center,
+                child: hudBtn(
                 icon: swapMode ? Icons.close : Icons.swap_horiz,
                 title: 'SWAP',
                 sub: (lang == AppLang.tr) ? 'Kalan: $swaps' : 'Left: $swaps',
@@ -1535,8 +1540,13 @@ Widget build(BuildContext context) {
                       }
                     : null,
               ),
+              ),
               SizedBox(width: 10 * ui),
-              hudBtn(
+              Transform.scale(
+                scaleX: 0.8,
+                scaleY: 1.0,
+                alignment: Alignment.center,
+                child: hudBtn(
                 icon: Icons.play_circle_fill,
                 title: '+1 SWAP',
                 sub: (lang == AppLang.tr) ? 'Reklam izle' : 'Watch ad',
@@ -1551,6 +1561,7 @@ Widget build(BuildContext context) {
                         });
                       }
                     : null,
+              ),
               ),
               SizedBox(width: 6 * ui),
               IconButton(
