@@ -10,7 +10,6 @@
 // - 5x8 grid, TR/EN, koyu premium arayüz
 
 import 'dart:math';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -50,12 +49,9 @@ class SimplePrefs {
     _mem[key] = List<String>.from(value);
     return true;
   }
-
-  Future<bool> remove(String key) async {
-    _mem.remove(key);
-    return true;
-  }
 }
+
+
 
 class BlockerCrackPainter extends CustomPainter {
   final int hp;
@@ -286,7 +282,9 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     if (v <= 0) return const Color(0xFF37474F);
     // Stable, unique color per numeric value (2,4,8,16,...)
     final idx = _valueColorIndex.putIfAbsent(v, () => _valueColorIndex.length % _valuePalette.length);
-    return _valuePalette[idx];
+    final base = _valuePalette[idx];
+    // Biraz daha mat/sakin: neon yormasın
+    return Color.lerp(base, const Color(0xFF0B0A16), 0.22)!;
   }
 
 
@@ -341,13 +339,20 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   static const _kBest = 'u2248_v14.8_best';
   static const _kSwaps = 'u2248_v14.8_swaps';
   static const _kLang = 'u2248_v14.8_lang';
+  static const _kNumFmt = 'u2248_v14.8_numfmt';
   static const _kSfx = 'u2248_v14.8_sfx';
   static const _kFx = 'u2248_v14.8_fx';
-  static const _kMode = 'u2248_v14.8_mode';
+  static const _kTest = 'u2248_v14.8_test';
   static const _kLb = 'u2248_v14.8_lb_local';
-  static const _kSaveGame = 'u2248_v14.9_savegame';
-  static const _kLastMoveAd = 'u2248_v14.9_last_move_ad';
-  static const _kLastMaxAd = 'u2248_v14.9_last_max_ad';
+
+static const _kGridV = 'u2248_v14.8_grid_v';
+static const _kGridB = 'u2248_v14.8_grid_b';
+static const _kGridF = 'u2248_v14.8_grid_f';
+static const _kScore = 'u2248_v14.8_score';
+static const _kMoves = 'u2248_v14.8_moves';
+static const _kBlockersRem = 'u2248_v14.8_blockers_rem';
+static const _kLastMaxAd = 'u2248_v14.8_last_max_ad';
+static const _kPendingDup = 'u2248_v14.8_pending_dup';
 
   final rnd = Random();
   final RewardedAdService adService = MockRewardedAdService();
@@ -362,8 +367,9 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   int score = 0;
   int best = 0;
   int swaps = 0;
-  int lastMoveAdAt = 0;
-  int lastMaxAdAt = 0;
+
+int _lastMaxAdTriggered = 0;
+int? _pendingDuplicateValue;
   int blockersRemaining = 0;
   int bestComboThisLevel = 0;
 
@@ -418,12 +424,15 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
 
     campaignLevels = List.generate(100, (i) => _generateCampaignLevel(i + 1));
     adService.initialize();
-    _startLevel(0, hardReset: true);
+    mode = GameMode.endless;
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    _startLevel(100, hardReset: true);
     _loadProgress();
   }
 
   @override
   void dispose() {
+    SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     glowCtrl.dispose();
     energyCtrl.dispose();
     super.dispose();
@@ -634,72 +643,69 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
   List<int> _spawnPoolForLevel(int logicalLevel) {
-    final maxSeen = _currentMaxValueOnBoard();
-    int minSpawn = 2;
-    if (maxSeen >= 2048) {
-      final k = ((log(maxSeen) / ln2).floor() - 10).clamp(1, 6);
-      minSpawn = 1 << k;
-    }
-    const base = <int>[2, 4, 8, 16, 32, 64, 128];
-    return base.where((v) => v >= minSpawn).toList();
+  // Spawn kuralı:
+  // - 2048'e kadar: 2-4-8-16-32-64
+  // - 2048 ve sonrası: ekrandaki MAX değere göre spawn tabanı yükselir.
+  //   Örn max=2048 => 4..128, max=4096 => 8..256, max=8192 => 16..512 (6 kademelik pencere)
+  final maxSeen = _currentMaxValueOnBoard();
+  if (maxSeen < 2048) {
+    return const <int>[2, 4, 8, 16, 32, 64];
   }
+  final maxExp = (log(maxSeen) / ln2).floor(); // 2048=2^11
+  final baseExp = max(2, maxExp - 9); // 11->2 (4), 12->3 (8) ...
+  return List<int>.generate(6, (i) => 1 << (baseExp + i));
+}
 
   // ---------- Persistence ----------
   Future<void> _loadProgress() async {
     final p = await SimplePrefs.getInstance();
-
     setState(() {
-      levelIdx = (p.getInt(_kLevel) ?? 100).clamp(100, 999999).toInt();
-      unlockedCampaign = (p.getInt(_kUnlocked) ?? 1).clamp(1, 100).toInt(); // backward compat
+      levelIdx = (p.getInt(_kLevel) ?? 0).clamp(0, 999999).toInt();
+      unlockedCampaign = (p.getInt(_kUnlocked) ?? 1).clamp(1, 100).toInt();
       best = p.getInt(_kBest) ?? 0;
       swaps = p.getInt(_kSwaps) ?? 0;
-      lastMoveAdAt = p.getInt(_kLastMoveAd) ?? 0;
-      lastMaxAdAt = p.getInt(_kLastMaxAd) ?? 0;
-
       lang = (p.getString(_kLang) ?? 'tr') == 'en' ? AppLang.en : AppLang.tr;
-      numFmt = (lang == AppLang.en) ? NumFmt.en : NumFmt.tr;
-
+      numFmt = (p.getString(_kNumFmt) ?? 'tr') == 'en' ? NumFmt.en : NumFmt.tr;
       sfxOn = p.getBool(_kSfx) ?? true;
       fxMode = (p.getString(_kFx) ?? 'high') == 'low' ? FxMode.low : FxMode.high;
-
-      // Campaign disabled permanently
+      testMode = p.getBool(_kTest) ?? false;
       mode = GameMode.endless;
       if (levelIdx < 100) levelIdx = 100;
-    });
+    
+  });
 
-    final snap = p.getString(_kSaveGame);
-    if (snap != null && snap.isNotEmpty) {
-      try {
-        final m = jsonDecode(snap) as Map<String, dynamic>;
-        final list = (m['cells'] as List).cast<Map<String, dynamic>>();
-        final restored = List.generate(rows, (_) => List.generate(cols, (_) => Cell(0)));
-        int i = 0;
-        for (int r = 0; r < rows; r++) {
-          for (int c = 0; c < cols; c++) {
-            final cell = list[i++];
-            restored[r][c] = Cell((cell['v'] as num).toInt())
-              ..blocked = (cell['b'] as bool)
-              ..frozen = (cell['f'] as bool)
-              ..blockerHp = (cell['hp'] as num).toInt();
-          }
-        }
-        setState(() {
-          grid = restored;
-          moves = (m['moves'] as num?)?.toInt() ?? moves;
-          score = (m['score'] as num?)?.toInt() ?? score;
-          swaps = (m['swaps'] as num?)?.toInt() ?? swaps;
-          blockersRemaining = (m['blockersRemaining'] as num?)?.toInt() ?? blockersRemaining;
-          bestComboThisLevel = (m['bestCombo'] as num?)?.toInt() ?? bestComboThisLevel;
-          if (score > best) best = score;
-        });
-        _rebuildValueColorMapFromGrid();
-        return;
-      } catch (_) {}
+  final v = p.getStringList(_kGridV) ?? const <String>[];
+  final b = p.getStringList(_kGridB) ?? const <String>[];
+  final f = p.getStringList(_kGridF) ?? const <String>[];
+  final hasSnap = v.length == rows * cols && b.length == rows * cols && f.length == rows * cols;
+
+  _startLevel(levelIdx, hardReset: !hasSnap);
+
+  if (hasSnap) {
+    // restore counters
+    score = p.getInt(_kScore) ?? score;
+    moves = p.getInt(_kMoves) ?? moves;
+    blockersRemaining = p.getInt(_kBlockersRem) ?? blockersRemaining;
+    _lastMaxAdTriggered = p.getInt(_kLastMaxAd) ?? 0;
+    final pd = p.getInt(_kPendingDup) ?? 0;
+    _pendingDuplicateValue = (pd > 0) ? pd : null;
+
+    // restore grid
+    int k = 0;
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        final cell = grid[r][c];
+        cell.value = int.tryParse(v[k]) ?? 0;
+        cell.blocked = b[k] == '1';
+        cell.frozen = f[k] == '1';
+        k++;
+      }
     }
-
-    _startLevel(levelIdx, hardReset: true);
-    _rebuildValueColorMapFromGrid();
   }
+
+  _rebuildValueColorMapFromGrid();
+  setState(() {});
+}
 
   Future<void> _saveProgress() async {
     final p = await SimplePrefs.getInstance();
@@ -707,45 +713,36 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     await p.setInt(_kUnlocked, unlockedCampaign);
     await p.setInt(_kBest, best);
     await p.setInt(_kSwaps, swaps);
-    await p.setInt(_kLastMoveAd, lastMoveAdAt);
-    await p.setInt(_kLastMaxAd, lastMaxAdAt);
-
     await p.setString(_kLang, lang == AppLang.en ? 'en' : 'tr');
+    await p.setString(_kNumFmt, numFmt == NumFmt.en ? 'en' : 'tr');
     await p.setBool(_kSfx, sfxOn);
     await p.setString(_kFx, fxMode == FxMode.low ? 'low' : 'high');
-    await p.setString(_kMode, 'endless');
+    await p.setBool(_kTest, testMode);
 
-    final cells = <Map<String, dynamic>>[];
-    for (int r = 0; r < rows; r++) {
-      for (int c = 0; c < cols; c++) {
-        final cc = grid[r][c];
-        cells.add({'v': cc.value, 'b': cc.blocked, 'f': cc.frozen, 'hp': cc.blockerHp});
-      }
-    }
-    await p.setString(
-      _kSaveGame,
-      jsonEncode({
-        'moves': moves,
-        'score': score,
-        'swaps': swaps,
-        'blockersRemaining': blockersRemaining,
-        'bestCombo': bestComboThisLevel,
-        'cells': cells,
-      }),
-    );
+await p.setInt(_kScore, score);
+await p.setInt(_kMoves, moves);
+await p.setInt(_kBlockersRem, blockersRemaining);
+await p.setInt(_kLastMaxAd, _lastMaxAdTriggered);
+if (_pendingDuplicateValue != null) {
+  await p.setInt(_kPendingDup, _pendingDuplicateValue!);
+} else {
+  await p.setInt(_kPendingDup, 0);
+}
+
+final v = <String>[];
+final b = <String>[];
+final f = <String>[];
+for (int r = 0; r < rows; r++) {
+  for (int c = 0; c < cols; c++) {
+    final cell = grid[r][c];
+    v.add(cell.value.toString());
+    b.add(cell.blocked ? '1' : '0');
+    f.add(cell.frozen ? '1' : '0');
   }
-
-  Future<void> _clearSavedGame() async {
-    final p = await SimplePrefs.getInstance();
-    await p.remove(_kSaveGame);
-    moves = 0;
-    score = 0;
-    swaps = 0;
-    blockersRemaining = 0;
-    bestComboThisLevel = 0;
-    lastMoveAdAt = 0;
-    lastMaxAdAt = 0;
-    await _saveProgress();
+}
+await p.setStringList(_kGridV, v);
+await p.setStringList(_kGridB, b);
+await p.setStringList(_kGridF, f);
   }
 
   Future<List<LeaderboardEntry>> _loadLocalLb() async {
@@ -786,76 +783,24 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     await onlineLb.submitScore(entry);
   }
 
-  Future<void> _showLeaderboardDialog() async {
-    final local = await _loadLocalLb();
-    final localCampaign = local.where((e) => e.mode == GameMode.campaign).toList()
-      ..sort((a, b) => b.score.compareTo(a.score));
-    final localEndless = local.where((e) => e.mode == GameMode.endless).toList()
-      ..sort((a, b) => b.score.compareTo(a.score));
-
-    final onlineCampaign = await onlineLb.fetchTop(mode: GameMode.campaign, limit: 30);
-    final onlineEndless = await onlineLb.fetchTop(mode: GameMode.endless, limit: 30);
-
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF171129),
-        title: Text(lang == AppLang.tr ? 'Liderlik Tablosu' : 'Leaderboard'),
-        content: SizedBox(
-          width: 380,
-          child: DefaultTabController(
-            length: 4,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const TabBar(
-                  isScrollable: true,
-                  tabs: [
-                    Tab(text: 'Local C'),
-                    Tab(text: 'Online C'),
-                    Tab(text: 'Local E'),
-                    Tab(text: 'Online E'),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  height: 280,
-                  child: TabBarView(
-                    children: [
-                      _lbList(localCampaign),
-                      _lbList(onlineCampaign),
-                      _lbList(localEndless),
-                      _lbList(onlineEndless),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
-      ),
-    );
-  }
-
-  Widget _lbList(List<LeaderboardEntry> list) {
-    if (list.isEmpty) {
-      return Center(child: Text(lang == AppLang.tr ? 'Kayıt yok' : 'No records'));
-    }
-    return ListView.builder(
-      itemCount: list.length.clamp(0, 30),
-      itemBuilder: (_, i) {
-        final e = list[i];
-        return ListTile(
-          dense: true,
-          leading: Text('#${i + 1}', style: const TextStyle(fontWeight: FontWeight.w900)),
-          title: Text('${e.name} • ${e.score}'),
-          subtitle: Text('${lang == AppLang.tr ? "Bölüm" : "Level"} ${e.level}'),
-        );
-      },
-    );
-  }
+  // The method _lbList was unused and has been removed.
+  // Widget _lbList(List<LeaderboardEntry> list) {
+  //   if (list.isEmpty) {
+  //     return Center(child: Text(lang == AppLang.tr ? 'Kayıt yok' : 'No records'));
+  //   }
+  //   return ListView.builder(
+  //     itemCount: list.length.clamp(0, 30),
+  //     itemBuilder: (_, i) {
+  //       final e = list[i];
+  //       return ListTile(
+  //         dense: true,
+  //         leading: Text('#${i + 1}', style: const TextStyle(fontWeight: FontWeight.w900)),
+  //         title: Text('${e.name} • ${e.score}'),
+  //         subtitle: Text('${lang == AppLang.tr ? "Bölüm" : "Level"} ${e.level}'),
+  //       );
+  //     },
+  //   );
+  // }
 
   // ---------- Game ----------
   
@@ -911,6 +856,10 @@ void _startLevel(int idx, {bool hardReset = false}) {
       final r = rnd.nextInt(rows), c = rnd.nextInt(cols);
       if (!grid[r][c].blocked) {
         grid[r][c].blocked = true;
+        // The previous code had a bug where blockerHp was not initialized,
+        // leading to potential issues if a blocker was hit before it had a value.
+        // Blockers now have an initial HP of 3.
+        grid[r][c].blockerHp = 3; 
         placed++;
       }
     }
@@ -933,7 +882,6 @@ void _startLevel(int idx, {bool hardReset = false}) {
     _maybeShowEpisodeIntro();
     _maybeShowBlockerTooltip();
   }
-
 
   int _swapReward(int m) {
     if (m <= lv.move3) return 3;
@@ -1010,73 +958,92 @@ void _startLevel(int idx, {bool hardReset = false}) {
 
   Future<void> _sfxLight() async {
     if (!sfxOn) return;
-    try { SystemSound.play(SystemSoundType.click); } catch (_) {}
     await HapticFeedback.selectionClick();
+    // DartPad/tek-dosya: gerçek piyano sample yerine sistem click + titreşim kullanıyoruz.
+    SystemSound.play(SystemSoundType.click);
   }
 
   Future<void> _sfxMerge(int mergedCount) async {
     if (!sfxOn) return;
+    await HapticFeedback.mediumImpact();
+    // Basit "piyano" hissi: birleşen blok sayısına göre kısa click melodisi
     final n = mergedCount.clamp(2, 10);
     for (int i = 0; i < n; i++) {
-      try { SystemSound.play(SystemSoundType.click); } catch (_) {}
-      await Future.delayed(Duration(milliseconds: fxMode == FxMode.high ? 55 : 35));
+      SystemSound.play(SystemSoundType.click);
+      await Future.delayed(Duration(milliseconds: 28 + i * 18));
     }
-    await HapticFeedback.mediumImpact();
   }
 
-  Future<void> _maybeTriggerMoveAd() async {
-    if (moves < 60) return;
-    if (moves % 60 != 0) return;
-    if (lastMoveAdAt == moves) return;
-    lastMoveAdAt = moves;
-    await _saveProgress();
-
+Future<void> _maybeTriggerMoveAd() async {
+  // Her 60 hamlede bir reklam (ödülsüz)
+  if (moves > 0 && moves % 60 == 0) {
     final ready = await adService.isAdReady();
     if (!ready) await adService.loadAd();
     await adService.showAd(onReward: () {});
   }
+}
 
-  Future<void> _maybeTriggerMaxAd({required int oldMax, required int newMax}) async {
-    if (newMax < 2048) return;
-    if (newMax <= oldMax) return;
-    if (newMax <= lastMaxAdAt) return;
+Future<void> _maybeTriggerMaxAd() async {
+  final maxNow = _currentMaxValueOnBoard();
+  if (maxNow < 2048) return;
+  if (maxNow <= _lastMaxAdTriggered) return;
 
-    lastMaxAdAt = newMax;
-    await _saveProgress();
+  _lastMaxAdTriggered = maxNow;
 
-    final ready = await adService.isAdReady();
-    if (!ready) await adService.loadAd();
+  final ready = await adService.isAdReady();
+  if (!ready) await adService.loadAd();
 
-    await adService.showAd(onReward: () async {
-      await _duplicateMaxTile(value: newMax);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(lang == AppLang.tr ? 'Ödül: Maksimum blok çoğaltıldı!' : 'Reward: Max tile duplicated!'),
-            duration: const Duration(milliseconds: 1400),
-          ),
-        );
-      }
-    });
-  }
+  await adService.showAd(onReward: () {
+    _grantDuplicateReward(maxNow);
+  });
+}
 
-  Future<void> _duplicateMaxTile({required int value}) async {
-    final empties = <Pos>[];
-    for (int r = 0; r < rows; r++) {
-      for (int c = 0; c < cols; c++) {
-        final cell = grid[r][c];
-        if (!cell.blocked && !cell.frozen && cell.value == 0) empties.add(Pos(r, c));
+void _grantDuplicateReward(int maxNow) {
+  // Ödül: ekrandaki en yüksek değerin 2 katını (duplicate) boş bir hücreye ekle.
+  final targetValue = maxNow * 2;
+
+  final empties = <Pos>[];
+  for (int r = 0; r < rows; r++) {
+    for (int c = 0; c < cols; c++) {
+      final cell = grid[r][c];
+      if (!cell.blocked && !cell.frozen && cell.value == 0) {
+        empties.add(Pos(r, c));
       }
     }
-    if (empties.isEmpty) return;
-    final p = empties[rnd.nextInt(empties.length)];
-    grid[p.r][p.c].value = value;
-    _rebuildValueColorMapFromGrid();
-    await _applyGravityAndRefill();
-    _rebuildValueColorMapFromGrid();
-    await _saveProgress();
-    if (mounted) setState(() {});
   }
+
+  if (empties.isEmpty) {
+    _pendingDuplicateValue = targetValue;
+    return;
+  }
+
+  final pick = empties[rnd.nextInt(empties.length)];
+  grid[pick.r][pick.c].value = targetValue;
+  _rebuildValueColorMapFromGrid();
+  setState(() {});
+}
+
+void _applyPendingDuplicateIfAny() {
+  final v = _pendingDuplicateValue;
+  if (v == null) return;
+
+  final empties = <Pos>[];
+  for (int r = 0; r < rows; r++) {
+    for (int c = 0; c < cols; c++) {
+      final cell = grid[r][c];
+      if (!cell.blocked && !cell.frozen && cell.value == 0) {
+        empties.add(Pos(r, c));
+      }
+    }
+  }
+
+  if (empties.isEmpty) return;
+  final pick = empties[rnd.nextInt(empties.length)];
+  grid[pick.r][pick.c].value = v;
+  _pendingDuplicateValue = null;
+}
+
+
 
   Pos? _cellFromLocal(Offset local, Size boardSize) {
     final innerW = boardSize.width - boardPadding * 2;
@@ -1249,27 +1216,6 @@ void _startLevel(int idx, {bool hardReset = false}) {
         if (mounted) setState(() {});
       }
       return;
-    } else if (moves > lv.move1) {
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => AlertDialog(
-          backgroundColor: const Color(0xFF171129),
-          title: Text(lang == AppLang.tr ? 'Başarısız' : 'Failed', style: _neon(const Color(0xFFFF4DFF), 22)),
-          content: Text(lang == AppLang.tr ? '60 hamleyi aştın.' : 'You exceeded 60 moves.'),
-          actions: [
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _startLevel(levelIdx);
-                  _rebuildValueColorMapFromGrid();
-              },
-              child: Text(lang == AppLang.tr ? 'Yeniden Dene' : 'Try Again'),
-            ),
-          ],
-        ),
-      );
     }
   }
 
@@ -1319,13 +1265,8 @@ void _startLevel(int idx, {bool hardReset = false}) {
     showEpisodeIntro = true;
 
     // Faz 1: Bölüm
-    if (lvl >= 100) {
-      episodeIntroTitle = 'MERGE BLOCKS\nNEON CHAIN';
-      episodeIntroRule = (lang == AppLang.tr) ? 'Hazır mısın?' : 'Are you ready?';
-    } else {
-      episodeIntroTitle = (lang == AppLang.tr) ? 'BÖLÜM $lvl' : 'LEVEL $lvl';
-      episodeIntroRule = (lang == AppLang.tr) ? 'Hazır mısın?' : 'Are you ready?';
-    }
+    episodeIntroTitle = (lang == AppLang.tr) ? 'BÖLÜM $lvl' : 'LEVEL $lvl';
+    episodeIntroRule = (lang == AppLang.tr) ? 'Hazır mısın?' : 'Are you ready?';
     if (mounted) setState(() {});
     await Future.delayed(const Duration(milliseconds: 2000)); // ~2x
 
@@ -1361,17 +1302,6 @@ void _startLevel(int idx, {bool hardReset = false}) {
     showBlockerTip = false;
     if (mounted) setState(() {});
     await p.setBool(_kBlockerTipSeen, true);
-  }
-
-  String _goalText() {
-    switch (lv.goalType) {
-      case GoalType.reachValue:
-        return lang == AppLang.tr ? 'Hedefe ulaş' : 'Reach target';
-      case GoalType.clearBlockers:
-        return lang == AppLang.tr ? 'Engeller: $blockersRemaining' : 'Blockers: $blockersRemaining';
-      case GoalType.comboCount:
-        return lang == AppLang.tr ? 'Combo ${lv.goalAmount}+ (şu an $bestComboThisLevel)' : 'Combo ${lv.goalAmount}+ (now $bestComboThisLevel)';
-    }
   }
 
   // Küsuratsız kısa sayı
@@ -1426,6 +1356,8 @@ void _startLevel(int idx, {bool hardReset = false}) {
         ],
       );
 
+  // The '_chip' widget was not referenced anywhere. Removing it.
+  /*
   Widget _chip(String txt, {Color color = const Color(0xFF39FF14)}) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
@@ -1439,6 +1371,7 @@ void _startLevel(int idx, {bool hardReset = false}) {
           style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 12.5),
         ),
       );
+  */
 
 
   bool _isFallTarget(int r, int c) {
@@ -1449,321 +1382,272 @@ void _startLevel(int idx, {bool hardReset = false}) {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final topBig = _maxTileBig();
-    final target = lv.targetBig;
-    final p = (topBig == BigInt.zero)
-        ? 0.0
-        : (topBig.toDouble() / target.toDouble()).clamp(0.0, 1.0);
+Widget build(BuildContext context) {
+  final mq = MediaQuery.of(context);
+  final size = mq.size;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0B0A16),appBar: AppBar(
-  backgroundColor: const Color(0xFF17132C),
-  title: const SizedBox.shrink(),
-  centerTitle: true,
-  actions: [
-    PopupMenuButton<String>(
-      icon: const Icon(Icons.settings),
-      onSelected: (v) async {
-        setState(() {
-          if (v == 'lang_tr') lang = AppLang.tr;
-          if (v == 'lang_en') lang = AppLang.en;
-          if (v == 'sfx') sfxOn = !sfxOn;
-          if (v == 'fx_low') fxMode = FxMode.low;
-          if (v == 'fx_high') fxMode = FxMode.high;
-        });
-        await _saveProgress();
-      },
-      itemBuilder: (_) => [
-        PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
-        PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),
-        PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
-        const PopupMenuDivider(),
-        PopupMenuItem(value: 'fx_high', child: Text('${t('fx')}: ${t('high')}')),
-        PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),
-      ],
-    ),
-    IconButton(
-      tooltip: t('restart'),
-      onPressed: () async {
-        await _clearSavedGame();
-        _startLevel(levelIdx, hardReset: true);
-        _rebuildValueColorMapFromGrid();
-      },
-      icon: const Icon(Icons.replay),
-    ),
-  ],
-),
-body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-          child: Column(
-            children: [
-              Wrap(spacing: 6, runSpacing: 6, children: [
-                _chip('${t('level')}: ${lv.index}'),
-                if (mode == GameMode.campaign) _chip('${t('unlocked')}: $unlockedCampaign', color: const Color(0xFFB388FF)),
-                _chip('${t('score')}: $score'),
-                _chip('${t('best')}: $best'),
-                _chip('${t('max')}: ${shortNumBig(topBig)}'),
-                _chip('${t('target')}: ${shortNumBig(target)}', color: const Color(0xFFFF4DFF)),
-                _chip('${t('move')}: $moves/${lv.move1}', color: const Color(0xFF39FF14)),
-                _chip('↔ $swaps', color: const Color(0xFF40C4FF)),
-                _chip('${t('episode')}: ${lv.episodeName}', color: const Color(0xFFFFD740)),
-                _chip('${t('goal')}: ${_goalText()}', color: const Color(0xFF64FFDA)),
-                if (testMode) _chip('TEST', color: const Color(0xFFFF5252)),
-              ]),
-              const SizedBox(height: 5),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: LinearProgressIndicator(
-                  value: p,
-                  minHeight: 6.4,
-                  backgroundColor: const Color(0xFF2D2450),
-                  color: const Color(0xFF39FF14),
-                ),
-              ),
-              const SizedBox(height: 5),
-              Expanded(
-                child: LayoutBuilder(
-                  builder: (context, c) {
-                    // Yeni premium yerleşim: Board tam ortada, yan paneller overlay (board alanını daraltmaz)
-                    const panelW = 64.0;
-                    final usableW = c.maxWidth;
-                    final usableH = c.maxHeight;
+  // Daha okunaklı: küçük ekranlarda bile büyük HUD (A52 dahil).
+  final ui = (size.shortestSide / 360.0).clamp(1.40, 2.20);
 
-                    // Board: width/height oranı = cols/rows
-                    final ratioWH = cols / rows;
+  // Board min/max/next
+  int minV = 0, maxV = 0;
+  for (final row in grid) {
+    for (final c in row) {
+      if (c.value <= 0) continue;
+      if (minV == 0 || c.value < minV) minV = c.value;
+      if (c.value > maxV) maxV = c.value;
+    }
+  }
+  final nextV = maxV <= 0 ? 2 : maxV * 2;
 
-                    // Panellerin board üstüne binmemesi için ortayı biraz daraltalım (çok küçük ekranda fallback var)
-                    final centerSafeW = max(120.0, usableW - (panelW * 2 + 16));
-                    double boardW = min(centerSafeW, usableH * ratioWH);
-                    double boardH = boardW / ratioWH;
-
-                    // Aşırı küçük ekranda (nadir) panelleri yok sayıp board'u yine de sığdıralım
-                    if (boardW < 160) {
-                      boardW = min(usableW, usableH * ratioWH);
-                      boardH = boardW / ratioWH;
-                    }
-
-                    final boardSize = Size(boardW, boardH);
-
-                    return Stack(
-                      children: [
-                        // Board
-                        Center(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: panelW + 8),
-                            child: SizedBox(
-                              width: boardW,
-                              height: boardH,
-                              child: _buildBoard(boardSize),
-                            ),
-                          ),
-                        ),
-
-                        // Sol kontrol paneli (overlay)
-                        Positioned(
-                          left: 0,
-                          top: 0,
-                          bottom: 0,
-                          child: SizedBox(width: panelW, child: _sidePanelLeft()),
-                        ),
-
-                        // Sağ panel (reklam/boş alan) (overlay)
-                        Positioned(
-                          right: 0,
-                          top: 0,
-                          bottom: 0,
-                          child: SizedBox(width: panelW, child: _adPanelRight()),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
+  Widget statChip(String label, String value, {required Color accent}) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 12 * ui, vertical: 8 * ui),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1436),
+        borderRadius: BorderRadius.circular(16 * ui),
+        border: Border.all(color: accent.withOpacity(0.60), width: 1.2),
+        boxShadow: [BoxShadow(color: accent.withOpacity(0.14), blurRadius: 14, offset: const Offset(0, 8))],
+      ),
+      child: Text(
+        '$label: $value',
+        style: TextStyle(color: accent, fontWeight: FontWeight.w900, fontSize: 14.5 * ui),
       ),
     );
   }
 
-  Widget _sidePanelLeft() {
-    return LayoutBuilder(
-      builder: (context, c) => SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(minHeight: c.maxHeight),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-        _logoCard('MERGE BLOCKS', mode == GameMode.campaign ? 'CAMP' : 'ENDL'),
-        const SizedBox(height: 5),
-        _logoCard('NEON', 'GRID'),
-        const SizedBox(height: 8),
-        _sideBtn(
-          icon: swapMode ? Icons.close : Icons.swap_horiz,
-          label: '$swaps',
-          onTap: (swaps > 0 && !isBusy)
-              ? () {
-                  setState(() {
-                    swapMode = !swapMode;
-                    if (!swapMode) swapFirst = null;
-                  });
-                  _saveProgress();
-                }
-              : null,
-        ),
-        const SizedBox(height: 5),
-        _sideBtn(
-          icon: Icons.play_circle_fill,
-          label: '+1',
-          onTap: !isBusy
-              ? () async {
-                  final ready = await adService.isAdReady();
-                  if (!ready) await adService.loadAd();
-                  await adService.showAd(onReward: () {
-                    setState(() => swaps++);
-                    _saveProgress();
-                  });
-                }
-              : null,
-        ),
-        const SizedBox(height: 5),
-        _sideBtn(icon: Icons.emoji_events, label: 'TOP', onTap: _showLeaderboardDialog),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _adPanelRight() {
-    // Reklam SDK bağlama noktası: gerçek banner widget buraya yerleştirilebilir.
-    return LayoutBuilder(
-      builder: (context, c) => SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(minHeight: c.maxHeight),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 52,
-                height: 210,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xFF1A1533), Color(0xFF0F0B23)],
-                  ),
-                  border: Border.all(color: const Color(0xFF6A52D9), width: 1.2),
-                  boxShadow: const [BoxShadow(color: Color(0x3300E5FF), blurRadius: 8)],
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+  Widget hudBtn({
+    required IconData icon,
+    required String title,
+    required String sub,
+    required Color accent,
+    VoidCallback? onTap,
+  }) {
+    final enabled = onTap != null;
+    return Opacity(
+      opacity: enabled ? 1.0 : 0.50,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18 * ui),
+          onTap: onTap,
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: 14 * ui, vertical: 10 * ui),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [Color(0xFF2A214B), Color(0xFF17132C)]),
+              borderRadius: BorderRadius.circular(18 * ui),
+              border: Border.all(color: accent.withOpacity(0.70), width: 1.3),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.40), blurRadius: 18, offset: const Offset(0, 10))],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 22 * ui, color: accent),
+                SizedBox(width: 8 * ui),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.campaign, color: Color(0xFF00E5FF), size: 18),
-                    const SizedBox(height: 8),
-                    RotatedBox(
-                      quarterTurns: 3,
-                      child: Text(
-                        lang == AppLang.tr ? 'REKLAM BANNER' : 'AD BANNER',
-                        style: const TextStyle(
-                          color: Color(0xFFB0BEC5),
-                          fontWeight: FontWeight.w800,
-                          fontSize: 10,
-                          letterSpacing: 0.6,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      width: 34,
-                      height: 70,
-                      decoration: BoxDecoration(
-                        color: const Color(0x2211CFFF),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0x5588E5FF)),
-                      ),
-                      alignment: Alignment.center,
-                      child: const Text(
-                        '320x50 / Adaptive',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Color(0xFF90A4AE),
-                          fontSize: 8,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
+                    Text(title, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14 * ui)),
+                    SizedBox(height: 2 * ui),
+                    Text(sub, style: TextStyle(color: Colors.white.withOpacity(0.90), fontWeight: FontWeight.w800, fontSize: 12 * ui)),
                   ],
                 ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget premiumMiniTile(int value) {
+    final c = _tileColor(value);
+    return Container(
+      width: 46 * ui,
+      height: 46 * ui,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12 * ui),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [c.withOpacity(0.88), c.withOpacity(0.58)],
+        ),
+        border: Border.all(color: Colors.white.withOpacity(0.16)),
+        boxShadow: [BoxShadow(color: c.withOpacity(0.22), blurRadius: 16, offset: const Offset(0, 10))],
+      ),
+      child: Center(
+        child: Text(
+          shortNumInt(value),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14 * ui),
+        ),
+      ),
+    );
+  }
+
+  return Scaffold(
+    backgroundColor: const Color(0xFF0B0A16),
+
+    // Üst panel: sadece Skor / En Büyük / Hedef + Swap + Reklam butonları
+    appBar: PreferredSize(
+      preferredSize: Size.fromHeight(78 * ui), // daha kompakt (%20 küçültülmüş hissi)
+      child: SafeArea(
+        bottom: false,
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFF17132C),
+            boxShadow: [BoxShadow(color: Color(0x66000000), blurRadius: 18, offset: Offset(0, 10))],
+          ),
+          padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 8 * ui),
+          child: Row(
+            children: [
+              // Sol: 3 etiket
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  child: Row(
+                    children: [
+                      statChip(t('score'), '$score', accent: const Color(0xFF39FF14)),
+                      SizedBox(width: 10 * ui),
+                      statChip(t('max'), shortNumBig(_maxTileBig()), accent: const Color(0xFF40C4FF)),
+                      SizedBox(width: 10 * ui),
+                      statChip(t('target'), shortNumBig(lv.targetBig), accent: const Color(0xFFFF4DFF)),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(width: 10 * ui),
+
+              // Sağ: Swap + Reklam
+              hudBtn(
+                icon: swapMode ? Icons.close : Icons.swap_horiz,
+                title: 'SWAP',
+                sub: (lang == AppLang.tr) ? 'Kalan: $swaps' : 'Left: $swaps',
+                accent: const Color(0xFF39FF14),
+                onTap: (swaps > 0 && !isBusy)
+                    ? () {
+                        setState(() {
+                          swapMode = !swapMode;
+                          if (!swapMode) swapFirst = null;
+                        });
+                        _saveProgress();
+                      }
+                    : null,
+              ),
+              SizedBox(width: 10 * ui),
+              hudBtn(
+                icon: Icons.play_circle_fill,
+                title: '+1 SWAP',
+                sub: (lang == AppLang.tr) ? 'Reklam izle' : 'Watch ad',
+                accent: const Color(0xFFFFD24A),
+                onTap: !isBusy
+                    ? () async {
+                        final ready = await adService.isAdReady();
+                        if (!ready) await adService.loadAd();
+                        await adService.showAd(onReward: () {
+                          setState(() => swaps++);
+                          _saveProgress();
+                        });
+                      }
+                    : null,
+              ),
+              SizedBox(width: 6 * ui),
+              IconButton(
+                tooltip: lang == AppLang.tr ? 'Yeniden Başlat' : 'Restart',
+                onPressed: () {
+                  _startLevel(levelIdx, hardReset: true);
+                  _rebuildValueColorMapFromGrid();
+                },
+                icon: const Icon(Icons.restart_alt),
+                iconSize: 24 * ui,
+              ),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.settings),
+                iconSize: 24 * ui,
+                onSelected: (v) async {
+                  setState(() {
+                    if (v == 'lang_tr') lang = AppLang.tr;
+                    if (v == 'lang_en') lang = AppLang.en;
+                    if (v == 'sfx') sfxOn = !sfxOn;
+                    if (v == 'fx_low') fxMode = FxMode.low;
+                    if (v == 'fx_high') fxMode = FxMode.high;
+                  });
+                  await _saveProgress();
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
+                  PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),
+                  const PopupMenuDivider(),
+                  PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
+                  PopupMenuItem(value: 'fx_high', child: Text('${t('fx')}: ${t('high')}')),
+                  PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),
+                ],
               ),
             ],
           ),
         ),
       ),
-    );
-  }
+    ),
 
-  Widget _logoCard(String a, String b) {
-    return Container(
-      width: 50,
-      height: 96,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF2B2152), Color(0xFF171129)]),
-        border: Border.all(color: const Color(0xFF6A52D9), width: 1.2),
-        boxShadow: const [BoxShadow(color: Color(0x3300E5FF), blurRadius: 8)],
-      ),
+    body: SafeArea(
+      top: false,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 1.0, vertical: 1.0),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(a, maxLines: 1, overflow: TextOverflow.visible, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Color(0xFF39FF14))),
-              const SizedBox(height: 1),
-              Text(b, maxLines: 1, overflow: TextOverflow.visible, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: Color(0xFFFF4DFF))),
-              const SizedBox(height: 4),
-              const Icon(Icons.auto_awesome, size: 14, color: Color(0xFF00E5FF)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+        padding: EdgeInsets.fromLTRB(10 * ui, 10 * ui, 10 * ui, 12 * ui),
+        child: Column(
+          children: [
+            // Neon çizgi + 3 premium blok göstergesi (min / max / next)
+            Container(
+              height: 2.6 * ui,
+              decoration: BoxDecoration(
+                color: const Color(0xFF39FF14).withOpacity(0.70),
+                borderRadius: BorderRadius.circular(99),
+                boxShadow: [BoxShadow(color: const Color(0xFF39FF14).withOpacity(0.25), blurRadius: 16)],
+              ),
+            ),
+            SizedBox(height: 10 * ui),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                premiumMiniTile(minV == 0 ? 2 : minV),
+                premiumMiniTile(maxV == 0 ? 2 : maxV),
+                premiumMiniTile(nextV),
+              ],
+            ),
+            SizedBox(height: 12 * ui),
 
-  Widget _sideBtn({required IconData icon, required String label, VoidCallback? onTap}) {
-    return Material(
-      color: const Color(0xFF231B42),
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Container(
-          width: 56,
-          height: 66,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFF6A52D9), width: 1.2),
-            boxShadow: const [BoxShadow(color: Color(0x3300E5FF), blurRadius: 8)],
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 26, color: Colors.white),
-              if (label.isNotEmpty) Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
-            ],
-          ),
+            // Board: maksimum alan (sağ/sol panel ve banner yok)
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, c) {
+                  final usableW = c.maxWidth;
+                  final usableH = c.maxHeight;
+
+                  final ratioWH = cols / rows;
+                  double boardW = min(usableW, usableH * ratioWH);
+                  double boardH = boardW / ratioWH;
+
+                  return Center(
+                    child: SizedBox(
+                      width: boardW,
+                      height: boardH,
+                      child: _buildBoard(Size(boardW, boardH)),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
+
+
+
+
+  
 
   Widget _buildBoard(Size boardSize) {
     return GestureDetector(
@@ -1790,7 +1674,6 @@ body: SafeArea(
               grid[b.r][b.c].value = tmp;
               swaps--;
               moves++;
-              await _maybeTriggerMoveAd();
               swapFirst = null;
               swapMode = false;
               isBusy = false;
@@ -1861,7 +1744,8 @@ if (_isLevelGoalCompleted() && mounted) {
 
         isBusy = true;
         moves++;
-        final oldMax = _currentMaxValueOnBoard();
+
+        await _maybeTriggerMoveAd();
 
         final target = path.last;
         final merged = _mergedValue(path);
@@ -1899,11 +1783,9 @@ if (_isLevelGoalCompleted() && mounted) {
         await _sfxMerge(path.length);
         _spawnComboParticles(_cellCenter(target, boardSize), path.length);
         await _applyGravityAndRefill();
+        _applyPendingDuplicateIfAny();
         _rebuildValueColorMapFromGrid();
-
-        final newMax = _currentMaxValueOnBoard();
-        await _maybeTriggerMoveAd();
-        await _maybeTriggerMaxAd(oldMax: oldMax, newMax: newMax);
+        await _maybeTriggerMaxAd();
 
         final pr = _praise(path.length);
         if (pr != null) {
@@ -2024,7 +1906,7 @@ if (_isLevelGoalCompleted() && mounted) {
                     child: Text(
                       lang == AppLang.tr
                           ? '🔒 Bu hücreler zincire dahil olmaz. Yanında birleşme yaparak kır (HP:3)'
-                          : '🔒 These cells cannot be chained',
+                          : '🔒 These cells cannot be chained. Make merges next to them to break (HP:3)', // Added EN translation for blocker HP
                       textAlign: TextAlign.center,
                       style: _neon(const Color(0xFFFFD740), 16),
                     ),
@@ -2082,7 +1964,7 @@ if (_isLevelGoalCompleted() && mounted) {
                                 style: _neon(const Color(0xFF39FF14), 36),
                                 textAlign: TextAlign.center,
                               ),
-                              const SizedBox(height: 5),
+                              const SizedBox(height: 6),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                 decoration: BoxDecoration(
@@ -2101,7 +1983,7 @@ if (_isLevelGoalCompleted() && mounted) {
                                   textAlign: TextAlign.center,
                                 ),
                               ),
-                              const SizedBox(height: 5),
+                              const SizedBox(height: 6),
                               Text(
                                 lang == AppLang.tr ? 'Geçmek için dokun' : 'Tap to skip',
                                 style: const TextStyle(
