@@ -387,6 +387,8 @@ static const _kPendingDup = 'u2248_v14.8_pending_dup';
   final OnlineLeaderboardService onlineLb = MockOnlineLeaderboardService();
 
   List<List<Cell>> grid = List.generate(8, (_) => List.generate(5, (_) => Cell(0)));
+  Size _lastBoardSize = Size.zero; // cached for particle positioning
+
   late final List<LevelConfig> campaignLevels;
 
   int levelIdx = 0; // campaign index 0..99, endless logical >99
@@ -1652,22 +1654,23 @@ appBar: PreferredSize(
   ),
 ),
 
+
 body: SafeArea(
       top: false,
       child: Padding(
         padding: EdgeInsets.fromLTRB(10 * ui, 10 * ui, 10 * ui, 12 * ui),
         child: Column(
           children: [
-            // Neon çizgi + 3 premium blok göstergesi (min / max / next)
-            /* mini HUD moved to overlay */
-            // 3D mini HUD overlay (minimal height)
-            
-                        // Board: maksimum alan (sağ/sol panel ve banner yok)
+            // Mini HUD (no overlap with board)
+            SizedBox(
+              height: 72 * ui,
+              child: Center(child: _buildTopMiniHud(ui)),
+            ),
+            SizedBox(height: 8 * ui),
+
+            // Board: maksimum alan (sağ/sol panel ve banner yok)
             Expanded(
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: LayoutBuilder(
+              child: LayoutBuilder(
                 builder: (context, c) {
                   final usableW = c.maxWidth;
                   final usableH = c.maxHeight;
@@ -1684,20 +1687,8 @@ body: SafeArea(
                     ),
                   );
                 },
-
-  ),
-      ),
-      Positioned(
-        top: 6 * ui,
-        left: 0,
-        right: 0,
-        child: IgnorePointer(
-          child: _buildTopMiniHud(ui),
-        ),
-      ),
-    ],
-  ),
-),
+              ),
+            ),
           ],
         ),
       ),
@@ -1738,10 +1729,10 @@ Widget _buildTopMiniHud(double ui) {
   // Trigger pulse on value changes (safe: no setState)
   WidgetsBinding.instance.addPostFrameCallback((_) => _maybePulseHud(minV, maxV, nextV));
 
-  final tileSize = 56 * ui; // smaller
+  final tileSize = 48 * ui; // smaller
   final radius = 14 * ui;
   final gap = 10 * ui;
-  final wireW = 34 * ui;
+  final wireW = 28 * ui;
 
   Widget squareTile(String label, int value, Color base, Color accent) {
     return AnimatedBuilder(
@@ -1895,7 +1886,9 @@ Widget _buildTopMiniHud(double ui) {
 
 
   Widget _buildBoard(Size boardSize) {
-    return GestureDetector(
+    
+    _lastBoardSize = boardSize;
+return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapDown: (d) async {
         final p = _cellFromLocal(d.localPosition, boardSize);
@@ -2026,7 +2019,7 @@ if (_isLevelGoalCompleted() && mounted) {
         if (score > best) best = score;
 
         await _sfxMerge(path.length);
-        _spawnComboParticles(_cellCenter(target, boardSize), path.length);
+        _spawnComboParticles(_cellCenter(target, _lastBoardSize), path.length);
         await _applyGravityAndRefill();
         _applyPendingDuplicateIfAny();
         _rebuildValueColorMapFromGrid();
@@ -2296,73 +2289,80 @@ if (_isLevelGoalCompleted() && mounted) {
         final hi = hsl.withLightness((hsl.lightness + 0.11).clamp(0, 1).toDouble()).toColor();
         final lo = hsl.withLightness((hsl.lightness - 0.10).clamp(0, 1).toDouble()).toColor();
 
-        children.add(Positioned(
-          left: c * (cw + cellGap) + shake,
-          top: r * (ch + cellGap),
-          width: cw,
-          height: ch,
-          child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 80),
-            opacity: visible ? 1.0 : 0.0,
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(13),
-                gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [hi, base, lo]),
-                border: Border.all(
-                  color: sw ? Colors.cyanAccent : (sel ? Colors.white : Colors.black26),
-                  width: sw ? 3 : (sel ? 2 : 1),
+children.add(
+  Positioned(
+    left: c * (cw + cellGap) + shake,
+    top: r * (ch + cellGap),
+    width: cw,
+    height: ch,
+    child: AnimatedOpacity(
+      duration: const Duration(milliseconds: 80),
+      opacity: visible ? 1.0 : 0.0,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(13),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [hi, base, lo],
+          ),
+          border: Border.all(
+            color: sw ? Colors.cyanAccent : (sel ? Colors.white : Colors.black26),
+            width: sw ? 3 : (sel ? 2 : 1),
+          ),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 7, offset: const Offset(0, 3)),
+            if (sel) BoxShadow(color: Colors.white.withOpacity(glowAnim.value), blurRadius: 8),
+          ],
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              left: 5,
+              right: 5,
+              top: 4,
+              child: Container(
+                height: 8,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.22),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 7, offset: const Offset(0, 3)),
-                  if (sel) BoxShadow(color: Colors.white.withOpacity(glowAnim.value), blurRadius: 8),
-                ],
-              ),
-              child: Stack(
-                children: [
-                  Positioned(left: 5, right: 5, top: 4, child: Container(height: 8, decoration: BoxDecoration(color: Colors.white.withOpacity(0.22), borderRadius: BorderRadius.circular(8)))),
-                  Center(
-                    child: cell.blocked
-                        ? Transform.scale(
-                            scale: 1.0 + (0.08 * sin(glowAnim.value * pi * 2)),
-                            child: Column(mainAxisSize: MainAxisSize.min, children: [
-
-                        if (cell.blocked && (blockerHitFlash[key] ?? 0.0) > 0)
-                          SizedBox.expand(
-                            child: IgnorePointer(
-                              child: Opacity(
-                                opacity: (blockerHitFlash[key] ?? 0.0) * 0.45,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(14),
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-
-                                  Icon(Icons.lock, color: Colors.white.withOpacity(0.95), size: 16),
-                                  Text('HP ${cell.blockerHp}', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900)),
-                                ]),
-                          )
-                        : cell.frozen
-                            ? const Icon(Icons.ac_unit, color: Colors.white, size: 17)
-                            : Text(
-                                shortNumInt(cell.value),
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.white,
-                                  fontSize: cell.value >= 1000000 ? 11.8 : (cell.value >= 10000 ? 14 : 17),
-                                  shadows: const [Shadow(color: Colors.black54, blurRadius: 3)],
-                                ),
-                              ),
-                  ),
-                ],
               ),
             ),
-          ),
-        ));
-      }
+            Center(
+              child: cell.blocked
+                  ? Transform.scale(
+                      scale: 1.0 + (0.08 * sin(glowAnim.value * pi * 2)),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.lock, color: Colors.white.withOpacity(0.95), size: 16),
+                          Text(
+                            'HP ${cell.blockerHp}',
+                            style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900),
+                          ),
+                        ],
+                      ),
+                    )
+                  : cell.frozen
+                      ? const Icon(Icons.ac_unit, color: Colors.white, size: 17)
+                      : Text(
+                          shortNumInt(cell.value),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                            fontSize: cell.value >= 1000000 ? 11.8 : (cell.value >= 10000 ? 14 : 17),
+                            shadows: const [Shadow(color: Colors.black54, blurRadius: 3)],
+                          ),
+                        ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  ),
+);
+}
     }
 
     return Stack(children: children);
