@@ -1552,7 +1552,60 @@ appBar: PreferredSize(
             swapW,
           );
 
-          final adBtn = fixedW(
+          
+final nextV = _maxTileBig() <= BigInt.zero ? BigInt.from(2) : (_maxTileBig() * BigInt.from(2));
+
+final nextChip = SizedBox(
+  width: ultra ? (74 * ui) : (compact ? (88 * ui) : (104 * ui)),
+  child: Transform.scale(
+    scale: ultra ? 0.78 : (compact ? 0.86 : 0.92),
+    alignment: Alignment.center,
+    child: Container(
+      padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 10 * ui),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16 * ui),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            const Color(0xFF4B2E0E).withOpacity(0.92),
+            const Color(0xFFFFC94A).withOpacity(0.55),
+          ],
+        ),
+        border: Border.all(color: Colors.white.withOpacity(0.14)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 12, offset: const Offset(0, 8)),
+          BoxShadow(color: const Color(0xFFFFC94A).withOpacity(0.20), blurRadius: 16, offset: const Offset(0, 8)),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'NEXT',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.92),
+              fontWeight: FontWeight.w900,
+              fontSize: 10 * ui,
+              letterSpacing: 0.2,
+            ),
+          ),
+          SizedBox(height: 2 * ui),
+          Text(
+            shortNumBig(nextV),
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+              fontSize: 14.5 * ui,
+              shadows: [Shadow(color: Colors.black.withOpacity(0.55), blurRadius: 6)],
+            ),
+          ),
+        ],
+      ),
+    ),
+  ),
+);
+final adBtn = fixedW(
             Transform.scale(
               scale: btnScale,
               alignment: Alignment.center,
@@ -1626,12 +1679,12 @@ appBar: PreferredSize(
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  children: [swapBtn, SizedBox(width: gap), adBtn],
+                  children: [swapBtn, SizedBox(width: gap), nextChip],
                 ),
                 SizedBox(height: 6 * ui),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
-                  children: [restartBtn, settingsBtn],
+                  children: [adBtn, SizedBox(width: gap), restartBtn, settingsBtn],
                 ),
               ],
             );
@@ -1661,12 +1714,8 @@ body: SafeArea(
         padding: EdgeInsets.fromLTRB(10 * ui, 10 * ui, 10 * ui, 12 * ui),
         child: Column(
           children: [
-            // Mini HUD (no overlap with board)
-            SizedBox(
-              height: 72 * ui,
-              child: Center(child: _buildTopMiniHud(ui)),
-            ),
-            SizedBox(height: 8 * ui),
+            // Mini HUD removed (MIN/MAX removed, NEXT moved to app bar)
+            SizedBox(height: 4 * ui),
 
             // Board: maksimum alan (sağ/sol panel ve banner yok)
             Expanded(
