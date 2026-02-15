@@ -1457,7 +1457,7 @@ appBar: PreferredSize(
         color: Color(0xFF17132C),
         boxShadow: [BoxShadow(color: Color(0x66000000), blurRadius: 18, offset: Offset(0, 10))],
       ),
-      padding: EdgeInsets.symmetric(horizontal: 8 * ui, vertical: 8 * ui),
+      padding: EdgeInsets.fromLTRB(8 * ui, 8 * ui, 14 * ui, 8 * ui),
       child: LayoutBuilder(
         builder: (context, c) {
           final compact = c.maxWidth < 420 * ui;
@@ -1620,14 +1620,14 @@ final adBtn = fixedW(
 return Align(
   alignment: Alignment.centerRight,
   child: Wrap(
-    alignment: WrapAlignment.end,
+    alignment: WrapAlignment.spaceBetween,
     crossAxisAlignment: WrapCrossAlignment.center,
     spacing: gap,
     runSpacing: 6 * ui,
     children: [
+      adBtn,
       swapBtn,
       nextChip,
-      adBtn,
       restartBtn,
       settingsBtn,
     ],
