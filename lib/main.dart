@@ -1381,8 +1381,7 @@ void _applyPendingDuplicateIfAny() {
     return false;
   }
 
-  
-@override
+  @override
 Widget build(BuildContext context) {
   final mq = MediaQuery.of(context);
   final size = mq.size;
