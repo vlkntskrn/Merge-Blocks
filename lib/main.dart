@@ -1447,6 +1447,7 @@ Widget build(BuildContext context) {
 
     // Üst panel: sadece Skor / En Büyük / Hedef + Swap + Reklam butonları
     
+
 appBar: PreferredSize(
   preferredSize: Size.fromHeight(72 * ui),
   child: SafeArea(
@@ -1457,100 +1458,139 @@ appBar: PreferredSize(
         boxShadow: [BoxShadow(color: Color(0x66000000), blurRadius: 18, offset: Offset(0, 10))],
       ),
       padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 8 * ui),
-      child: Row(
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              child: Row(
-                children: [
-                  statChip(t('score'), '$score', accent: const Color(0xFF39FF14)),
-                  SizedBox(width: 10 * ui),
-                  statChip(t('max'), shortNumBig(_maxTileBig()), accent: const Color(0xFF40C4FF)),
-                  SizedBox(width: 10 * ui),
-                  statChip(t('target'), shortNumBig(lv.targetBig), accent: const Color(0xFFFF4DFF)),
-                ],
-              ),
-            ),
-          ),
-          SizedBox(width: 8 * ui),
+      child: LayoutBuilder(
+        builder: (context, c) {
+          // Compact mode for small widths (ensures no overflow on all Android phones)
+          final compact = c.maxWidth < 420 * ui;
 
-          Transform.scale(
-            scaleX: 0.8,
-            scaleY: 1.0,
-            alignment: Alignment.center,
-            child: hudBtn(
-              icon: swapMode ? Icons.close : Icons.swap_horiz,
-              title: 'SWAP',
-              sub: (lang == AppLang.tr) ? 'Kalan: $swaps' : 'Left: $swaps',
-              accent: const Color(0xFF39FF14),
-              onTap: (swaps > 0 && !isBusy)
-                  ? () {
-                      setState(() {
-                        swapMode = !swapMode;
-                        if (!swapMode) swapFirst = null;
-                      });
-                      _saveProgress();
-                    }
-                  : null,
-            ),
-          ),
-          SizedBox(width: 6 * ui),
-          Transform.scale(
-            scaleX: 0.8,
-            scaleY: 1.0,
-            alignment: Alignment.center,
-            child: hudBtn(
-              icon: Icons.play_circle_fill,
-              title: '+1 SWAP',
-              sub: (lang == AppLang.tr) ? 'Reklam izle' : 'Watch ad',
-              accent: const Color(0xFFFFD24A),
-              onTap: !isBusy
-                  ? () async {
-                      final ready = await adService.isAdReady();
-                      if (!ready) await adService.loadAd();
-                      await adService.showAd(onReward: () {
-                        setState(() => swaps++);
-                        _saveProgress();
-                      });
-                    }
-                  : null,
-            ),
-          ),
-          SizedBox(width: 2 * ui),
-          IconButton(
-            tooltip: lang == AppLang.tr ? 'Yeniden Başlat' : 'Restart',
-            onPressed: () {
-              _startLevel(levelIdx, hardReset: true);
-              _rebuildValueColorMapFromGrid();
-            },
-            icon: const Icon(Icons.restart_alt),
-            iconSize: 24 * ui,
-          ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.settings),
-            iconSize: 24 * ui,
-            onSelected: (v) async {
-              setState(() {
-                if (v == 'lang_tr') lang = AppLang.tr;
-                if (v == 'lang_en') lang = AppLang.en;
-                if (v == 'sfx') sfxOn = !sfxOn;
-                if (v == 'fx_low') fxMode = FxMode.low;
-                if (v == 'fx_high') fxMode = FxMode.high;
-              });
-              await _saveProgress();
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
-              PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),
-              const PopupMenuDivider(),
-              PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
-              PopupMenuItem(value: 'fx_high', child: Text('${t('fx')}: ${t('high')}')),
-              PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),
+          final swapW = compact ? (140 * ui) : (170 * ui);
+          final adW = compact ? (150 * ui) : (185 * ui);
+          final gap = compact ? (4 * ui) : (8 * ui);
+
+          Widget fixedWidth(Widget child, double w) =>
+              SizedBox(width: w, child: FittedBox(fit: BoxFit.scaleDown, child: child));
+
+          return Row(
+            children: [
+              // LEFT: Stats - always flexible and scrollable
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  child: Row(
+                    children: [
+                      statChip(t('score'), '$score', accent: const Color(0xFF39FF14)),
+                      SizedBox(width: 10 * ui),
+                      statChip(t('max'), shortNumBig(_maxTileBig()), accent: const Color(0xFF40C4FF)),
+                      SizedBox(width: 10 * ui),
+                      statChip(t('target'), shortNumBig(lv.targetBig), accent: const Color(0xFFFF4DFF)),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(width: gap),
+
+              // RIGHT: Actions - fixed widths so it never overflows
+              fixedWidth(
+                Transform.scale(
+                  scaleX: 0.8,
+                  scaleY: 1.0,
+                  alignment: Alignment.center,
+                  child: hudBtn(
+                    icon: swapMode ? Icons.close : Icons.swap_horiz,
+                    title: 'SWAP',
+                    sub: compact
+                        ? (lang == AppLang.tr ? '$swaps' : '$swaps')
+                        : (lang == AppLang.tr ? 'Kalan: $swaps' : 'Left: $swaps'),
+                    accent: const Color(0xFF39FF14),
+                    onTap: (swaps > 0 && !isBusy)
+                        ? () {
+                            setState(() {
+                              swapMode = !swapMode;
+                              if (!swapMode) swapFirst = null;
+                            });
+                            _saveProgress();
+                          }
+                        : null,
+                  ),
+                ),
+                swapW,
+              ),
+
+              SizedBox(width: gap),
+
+              fixedWidth(
+                Transform.scale(
+                  scaleX: 0.8,
+                  scaleY: 1.0,
+                  alignment: Alignment.center,
+                  child: hudBtn(
+                    icon: Icons.play_circle_fill,
+                    title: '+1 SWAP',
+                    sub: compact
+                        ? (lang == AppLang.tr ? 'Reklam' : 'Ad')
+                        : (lang == AppLang.tr ? 'Reklam izle' : 'Watch ad'),
+                    accent: const Color(0xFFFFD24A),
+                    onTap: !isBusy
+                        ? () async {
+                            final ready = await adService.isAdReady();
+                            if (!ready) await adService.loadAd();
+                            await adService.showAd(onReward: () {
+                              setState(() => swaps++);
+                              _saveProgress();
+                            });
+                          }
+                        : null,
+                  ),
+                ),
+                adW,
+              ),
+
+              SizedBox(width: gap),
+
+              // Icons are always visible
+              SizedBox(
+                width: (compact ? 42 : 48) * ui,
+                child: IconButton(
+                  tooltip: lang == AppLang.tr ? 'Yeniden Başlat' : 'Restart',
+                  padding: EdgeInsets.zero,
+                  onPressed: () {
+                    _startLevel(levelIdx, hardReset: true);
+                    _rebuildValueColorMapFromGrid();
+                  },
+                  icon: const Icon(Icons.restart_alt),
+                  iconSize: 24 * ui,
+                ),
+              ),
+
+              SizedBox(
+                width: (compact ? 42 : 48) * ui,
+                child: PopupMenuButton<String>(
+                  icon: const Icon(Icons.settings),
+                  iconSize: 24 * ui,
+                  onSelected: (v) async {
+                    setState(() {
+                      if (v == 'lang_tr') lang = AppLang.tr;
+                      if (v == 'lang_en') lang = AppLang.en;
+                      if (v == 'sfx') sfxOn = !sfxOn;
+                      if (v == 'fx_low') fxMode = FxMode.low;
+                      if (v == 'fx_high') fxMode = FxMode.high;
+                    });
+                    await _saveProgress();
+                  },
+                  itemBuilder: (_) => [
+                    PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
+                    PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),
+                    const PopupMenuDivider(),
+                    PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
+                    PopupMenuItem(value: 'fx_high', child: Text('${t('fx')}: ${t('high')}')),
+                    PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),
+                  ],
+                ),
+              ),
             ],
-          ),
-        ],
+          );
+        },
       ),
     ),
   ),
