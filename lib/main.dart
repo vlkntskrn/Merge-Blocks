@@ -441,9 +441,9 @@ int? _pendingDuplicateValue;
   late final Animation<double> glowAnim;
   
 // Mini HUD electric + pulse animations (min/max/next)
-late final AnimationController hudPulseCtrl;
-late final Animation<double> hudPulseAnim;
-late final AnimationController electricCtrl;
+late AnimationController hudPulseCtrl;
+late Animation<double> hudPulseAnim;
+late AnimationController electricCtrl;
 
 int _hudMinPrev = -1;
 int _hudMaxPrev = -1;
@@ -459,6 +459,11 @@ late final AnimationController energyCtrl;
     glowCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 860))..repeat(reverse: true);
     glowAnim = Tween<double>(begin: 0.24, end: 0.92).animate(CurvedAnimation(parent: glowCtrl, curve: Curves.easeInOut));
     energyCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
+
+// Mini HUD pulse + electric animations
+hudPulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
+hudPulseAnim = CurvedAnimation(parent: hudPulseCtrl, curve: Curves.easeOutCubic);
+electricCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat();
     energyAnim = CurvedAnimation(parent: energyCtrl, curve: Curves.linear);
 
     campaignLevels = List.generate(100, (i) => _generateCampaignLevel(i + 1));
