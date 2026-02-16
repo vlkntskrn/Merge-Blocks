@@ -1460,54 +1460,55 @@ appBar: PreferredSize(
       padding: EdgeInsets.fromLTRB(10 * ui, 12 * ui, 16 * ui, 12 * ui),
       child: LayoutBuilder(
         builder: (context, c) {
-          final compact = c.maxWidth < 420 * ui;
-          final ultra = c.maxWidth < 360 * ui;
+  final w = c.maxWidth;
+  final ultra = w < 360 * ui;
+  final compact = w < 420 * ui;
 
-          final btnScale = ultra ? 0.68 : (compact ? 0.74 : 0.80);
-          final hudW = ultra ? (110 * ui) : (compact ? (124 * ui) : (140 * ui));
-final hudScale = ultra ? 1.45 : (compact ? 1.60 : 1.75);
-final swapW = hudW;
-final adW = hudW;
-final gap = ultra ? (4 * ui) : (compact ? (6 * ui) : (10 * ui));
+  final gap = (ultra ? 6 : 10) * ui;
 
-          Widget fixedW(Widget child, double w) =>
-              SizedBox(width: w, child: FittedBox(fit: BoxFit.scaleDown, child: child));
+  // Right side fixed buttons
+  final iconW = (ultra ? 40 : 46) * ui;
+  final rightW = iconW * 2 + gap;
 
-          final swapBtn = fixedW(
-            Transform.scale(
-              scale: btnScale,
-              alignment: Alignment.center,
-              child: hudBtn(
-                icon: swapMode ? Icons.close : Icons.swap_horiz,
-                title: 'SWAP',
-                sub: ultra
-                    ? '$swaps'
-                    : (lang == AppLang.tr ? 'Kalan: $swaps' : 'Left: $swaps'),
-                accent: const Color(0xFF39FF14),
-                onTap: (swaps > 0 && !isBusy)
-                    ? () {
-                        setState(() {
-                          swapMode = !swapMode;
-                          if (!swapMode) swapFirst = null;
-                        });
-                        _saveProgress();
-                      }
-                    : null,
-              ),
-            ),
-            swapW,
-          );
+  // Left side 3 slots: Ad / Swap / Next
+  final avail = (w - rightW - gap).clamp(0.0, double.infinity);
+  final slotW = (avail / 3).clamp(90 * ui, 160 * ui);
+  final slotH = (ultra ? 54 : (compact ? 58 : 62)) * ui;
 
-          
-final nextV = _maxTileBig() <= BigInt.zero ? BigInt.from(2) : (_maxTileBig() * BigInt.from(2));
+  Widget slot(Widget child) => SizedBox(
+        width: slotW,
+        height: slotH,
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: child,
+          ),
+        ),
+      );
 
-final nextChip = SizedBox(
-  width: hudW,
-  child: Transform(
-    transform: Matrix4.diagonal3Values(hudScale * 0.85, hudScale * 0.90, 1.0),
-    alignment: Alignment.center,
-    child: Container(
-      padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 10 * ui),
+  final swapBtn = slot(
+    hudBtn(
+      icon: swapMode ? Icons.close : Icons.swap_horiz,
+      title: 'SWAP',
+      sub: ultra ? '$swaps' : (lang == AppLang.tr ? 'Kalan: $swaps' : 'Left: $swaps'),
+      accent: const Color(0xFF39FF14),
+      onTap: (swaps > 0 && !isBusy)
+          ? () {
+              setState(() {
+                swapMode = !swapMode;
+                if (!swapMode) swapFirst = null;
+              });
+              _saveProgress();
+            }
+          : null,
+    ),
+  );
+
+  final nextV = _maxTileBig() <= BigInt.zero ? BigInt.from(2) : (_maxTileBig() * BigInt.from(2));
+
+  final nextChip = slot(
+    Container(
+      padding: EdgeInsets.symmetric(horizontal: 14 * ui, vertical: 10 * ui),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16 * ui),
         gradient: LinearGradient(
@@ -1532,7 +1533,7 @@ final nextChip = SizedBox(
             style: TextStyle(
               color: Colors.white.withOpacity(0.92),
               fontWeight: FontWeight.w900,
-              fontSize: 18.0 * ui,
+              fontSize: (ultra ? 14 : 16) * ui,
               letterSpacing: 0.2,
             ),
           ),
@@ -1542,92 +1543,81 @@ final nextChip = SizedBox(
             style: TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.w900,
-              fontSize: 26.0 * ui,
+              fontSize: (ultra ? 22 : 26) * ui,
               shadows: [Shadow(color: Colors.black.withOpacity(0.55), blurRadius: 6)],
             ),
           ),
         ],
       ),
     ),
-  ),
-);
-final adBtn = fixedW(
-            Transform.scale(
-              scale: btnScale,
-              alignment: Alignment.center,
-              child: hudBtn(
-                icon: Icons.play_circle_fill,
-                title: ultra ? '+1' : '+1 SWAP',
-                sub: ultra ? (lang == AppLang.tr ? 'Ad' : 'Ad') : (lang == AppLang.tr ? 'Reklam' : 'Ad'),
-                accent: const Color(0xFFFFD24A),
-                onTap: !isBusy
-                    ? () async {
-                        final ready = await adService.isAdReady();
-                        if (!ready) await adService.loadAd();
-                        await adService.showAd(onReward: () {
-                          setState(() => swaps++);
-                          _saveProgress();
-                        });
-                      }
-                    : null,
-              ),
-            ),
-            adW,
-          );
+  );
 
-          final restartBtn = SizedBox(
-            width: (ultra ? 38 : 46) * ui,
-            child: IconButton(
-              tooltip: lang == AppLang.tr ? 'Yeniden Başlat' : 'Restart',
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-              onPressed: () {
-                _startLevel(levelIdx, hardReset: true);
-                _rebuildValueColorMapFromGrid();
-              },
-              icon: const Icon(Icons.restart_alt),
-              iconSize: (ultra ? 22 : 24) * ui,
-            ),
-          );
+  final adBtn = slot(
+    hudBtn(
+      icon: Icons.play_circle_fill,
+      title: ultra ? '+1' : '+1 SWAP',
+      sub: ultra ? (lang == AppLang.tr ? 'Ad' : 'Ad') : (lang == AppLang.tr ? 'Reklam' : 'Ad'),
+      accent: const Color(0xFFFFD24A),
+      onTap: !isBusy
+          ? () async {
+              final ready = await adService.isAdReady();
+              if (!ready) await adService.loadAd();
+              await adService.showAd(onReward: () {
+                setState(() => swaps++);
+                _saveProgress();
+              });
+            }
+          : null,
+    ),
+  );
 
-          final settingsBtn = SizedBox(
-            width: (ultra ? 38 : 46) * ui,
-            child: PopupMenuButton<String>(
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-              icon: const Icon(Icons.settings),
-              iconSize: (ultra ? 22 : 24) * ui,
-              onSelected: (v) async {
-                setState(() {
-                  if (v == 'lang_tr') lang = AppLang.tr;
-                  if (v == 'lang_en') lang = AppLang.en;
-                  if (v == 'sfx') sfxOn = !sfxOn;
-                  if (v == 'fx_low') fxMode = FxMode.low;
-                  if (v == 'fx_high') fxMode = FxMode.high;
-                });
-                await _saveProgress();
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
-                PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),
-                const PopupMenuDivider(),
-                PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
-                PopupMenuItem(value: 'fx_high', child: Text('${t('fx')}: ${t('high')}')),
-                PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),
-              ],
-            ),
-          );
+  final restartBtn = SizedBox(
+    width: iconW,
+    child: IconButton(
+      tooltip: lang == AppLang.tr ? 'Yeniden Başlat' : 'Restart',
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+      onPressed: () {
+        _startLevel(levelIdx, hardReset: true);
+        _rebuildValueColorMapFromGrid();
+      },
+      icon: const Icon(Icons.restart_alt),
+      iconSize: (ultra ? 22 : 24) * ui,
+    ),
+  );
 
+  final settingsBtn = SizedBox(
+    width: iconW,
+    child: PopupMenuButton<String>(
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+      icon: const Icon(Icons.settings),
+      iconSize: (ultra ? 22 : 24) * ui,
+      onSelected: (v) async {
+        setState(() {
+          if (v == 'lang_tr') lang = AppLang.tr;
+          if (v == 'lang_en') lang = AppLang.en;
+          if (v == 'sfx') sfxOn = !sfxOn;
+          if (v == 'fx_low') fxMode = FxMode.low;
+          if (v == 'fx_high') fxMode = FxMode.high;
+        });
+        await _saveProgress();
+      },
+      itemBuilder: (_) => [
+        PopupMenuItem(value: 'lang_tr', child: Text('${t('language')}: TR')),
+        PopupMenuItem(value: 'lang_en', child: Text('${t('language')}: EN')),
+        const PopupMenuDivider(),
+        PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
+        PopupMenuItem(value: 'fx_high', child: Text('${t('fx')}: ${t('high')}')),
+        PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),
+      ],
+    ),
+  );
 
-// Single-line top bar: keep NEXT on the same line by scaling down if needed.
-return Row(
-  children: [
-    Expanded(
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        alignment: Alignment.centerLeft,
+  return Row(
+    children: [
+      Expanded(
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
             adBtn,
             SizedBox(width: gap),
@@ -1637,18 +1627,17 @@ return Row(
           ],
         ),
       ),
-    ),
-    SizedBox(width: gap),
-    Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        restartBtn,
-        SizedBox(width: gap),
-        settingsBtn,
-      ],
-    ),
-  ],
-);
+      SizedBox(width: gap),
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          restartBtn,
+          SizedBox(width: gap),
+          settingsBtn,
+        ],
+      ),
+    ],
+  );
 },
       ),
     ),
