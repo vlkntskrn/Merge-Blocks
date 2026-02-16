@@ -1504,54 +1504,6 @@ appBar: PreferredSize(
     ),
   );
 
-  final nextV = _maxTileBig() <= BigInt.zero ? BigInt.from(2) : (_maxTileBig() * BigInt.from(2));
-
-  final nextChip = slot(
-    Container(
-      padding: EdgeInsets.symmetric(horizontal: 14 * ui, vertical: 10 * ui),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16 * ui),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            const Color(0xFF4B2E0E).withOpacity(0.92),
-            const Color(0xFFFFC94A).withOpacity(0.55),
-          ],
-        ),
-        border: Border.all(color: Colors.white.withOpacity(0.14)),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 12, offset: const Offset(0, 8)),
-          BoxShadow(color: const Color(0xFFFFC94A).withOpacity(0.20), blurRadius: 16, offset: const Offset(0, 8)),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'NEXT',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.92),
-              fontWeight: FontWeight.w900,
-              fontSize: (ultra ? 14 : 16) * ui,
-              letterSpacing: 0.2,
-            ),
-          ),
-          SizedBox(height: 2 * ui),
-          Text(
-            shortNumBig(nextV),
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-              fontSize: (ultra ? 22 : 26) * ui,
-              shadows: [Shadow(color: Colors.black.withOpacity(0.55), blurRadius: 6)],
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-
   final adBtn = slot(
     hudBtn(
       icon: Icons.play_circle_fill,
@@ -1623,7 +1575,6 @@ appBar: PreferredSize(
             SizedBox(width: gap),
             swapBtn,
             SizedBox(width: gap),
-            nextChip,
           ],
         ),
       ),
