@@ -1464,9 +1464,11 @@ appBar: PreferredSize(
           final ultra = c.maxWidth < 360 * ui;
 
           final btnScale = ultra ? 0.68 : (compact ? 0.74 : 0.80);
-          final swapW = ultra ? (118 * ui) : (compact ? (132 * ui) : (165 * ui));
-          final adW = ultra ? (124 * ui) : (compact ? (140 * ui) : (180 * ui));
-          final gap = ultra ? (4 * ui) : (compact ? (6 * ui) : (10 * ui));
+          final hudW = ultra ? (110 * ui) : (compact ? (124 * ui) : (140 * ui));
+final hudScale = ultra ? 1.45 : (compact ? 1.60 : 1.75);
+final swapW = hudW;
+final adW = hudW;
+final gap = ultra ? (4 * ui) : (compact ? (6 * ui) : (10 * ui));
 
           Widget fixedW(Widget child, double w) =>
               SizedBox(width: w, child: FittedBox(fit: BoxFit.scaleDown, child: child));
@@ -1500,9 +1502,9 @@ appBar: PreferredSize(
 final nextV = _maxTileBig() <= BigInt.zero ? BigInt.from(2) : (_maxTileBig() * BigInt.from(2));
 
 final nextChip = SizedBox(
-  width: ultra ? (110 * ui) : (compact ? (124 * ui) : (140 * ui)),
-  child: Transform.scale(
-    scale: ultra ? 1.45 : (compact ? 1.60 : 1.75),
+  width: hudW,
+  child: Transform(
+    transform: Matrix4.diagonal3Values(hudScale * 0.85, hudScale * 0.90, 1.0),
     alignment: Alignment.center,
     child: Container(
       padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 10 * ui),
