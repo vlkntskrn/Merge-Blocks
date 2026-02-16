@@ -363,6 +363,7 @@ static const _kLastMilestone = 'u2248_v15.0_last_milestone';
   late final Animation<double> hudPulse;
 
   late double _hudMinPrev;
+  // Cache of max tile value for HUD animations.
   int? _hudMaxPrev;
   late double _hudNextPrev;
 
@@ -714,7 +715,8 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
   diamonds = p.getInt(_kDiamonds) ?? 0;
   _lastMilestone = p.getInt(_kLastMilestone) ?? 0;
 
-  lang = (p.getString(_kLang) ?? 'tr') == 'en' ? AppLang.en : AppLang.de;
+  // Default must be English; persist user's choice (German) for next launches.
+  lang = (p.getString(_kLang) ?? 'en') == 'de' ? AppLang.de : AppLang.en;
   numFmt = (p.getString(_kNumFmt) ?? 'tr') == 'en' ? NumFmt.en : NumFmt.de;
   sfxOn = p.getBool(_kSfx) ?? true;
   fxMode = (p.getString(_kFx) ?? 'high') == 'low' ? FxMode.low : FxMode.high;
@@ -1356,8 +1358,8 @@ Widget build(BuildContext context) {
   final mq = MediaQuery.of(context);
   final size = mq.size;
 
-  // Daha okunaklı: küçük ekranlarda bile büyük HUD (A52 dahil).
-  final ui = (size.shortestSide / 360.0).clamp(1.40, 2.20);
+  // Responsive scale (A52 dahil): aşırı büyümeyi engelle ki üst banner overlap yapmasın.
+  final ui = (size.shortestSide / 360.0).clamp(1.0, 1.6);
 
   Widget hudBtn({
     required IconData icon,
@@ -1372,20 +1374,21 @@ Widget build(BuildContext context) {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(18 * ui),
+          borderRadius: BorderRadius.circular(16 * ui),
           onTap: onTap,
           child: Container(
-            padding: EdgeInsets.symmetric(horizontal: 14 * ui, vertical: 10 * ui),
+            // Slightly smaller on phones so the Settings button never overlaps.
+            padding: EdgeInsets.symmetric(horizontal: 12 * ui, vertical: 8.5 * ui),
             decoration: BoxDecoration(
               gradient: const LinearGradient(colors: [Color(0xFF2A214B), Color(0xFF17132C)]),
-              borderRadius: BorderRadius.circular(18 * ui),
+              borderRadius: BorderRadius.circular(16 * ui),
               border: Border.all(color: accent.withOpacity(0.70), width: 1.3),
               boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.40), blurRadius: 18, offset: const Offset(0, 10))],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(icon, size: 22 * ui, color: accent),
+                Icon(icon, size: 20 * ui, color: accent),
                 SizedBox(width: 8 * ui),
                 Column(
                   mainAxisSize: MainAxisSize.min,
@@ -2262,10 +2265,18 @@ children.add(
     // no-op (SFX disabled in this build)
   }
 
+  // Orthogonal adjacency (used for Swap mode).
   bool _isOrthogonalOneStep(Pos a, Pos b) {
     final dr = (a.r - b.r).abs();
     final dc = (a.c - b.c).abs();
     return (dr + dc) == 1;
+  }
+
+  // 8-direction adjacency (orthogonal + diagonal) used for path linking.
+  bool _isAdjacentOneStep8(Pos a, Pos b) {
+    final dr = (a.r - b.r).abs();
+    final dc = (a.c - b.c).abs();
+    return dr <= 1 && dc <= 1 && (dr + dc) > 0;
   }
 
   // Path linking rules:
@@ -2276,7 +2287,7 @@ children.add(
 bool _canLinkPath(List<Pos> path, Pos next) {
   if (path.isEmpty) return false;
   final last = path.last;
-  if (!_isOrthogonalOneStep(last, next)) return false; // now 8-dir
+  if (!_isAdjacentOneStep8(last, next)) return false;
   if (path.contains(next)) return false;
 
   final base = grid[path.first.r][path.first.c].value;
@@ -2353,7 +2364,6 @@ String _praise(int combo) {
     if (combo >= 4) return t('comboNice');
     return t('comboGood');
   }
-
 
 }
 
