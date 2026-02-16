@@ -10,6 +10,7 @@
 // - 5x8 grid, TR/EN, koyu premium arayüz
 
 import 'dart:math';
+import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -352,7 +353,23 @@ static const _kLastMilestone = 'u2248_v15.0_last_milestone';
   int best = 0;
   int swaps = 0;
   int diamonds = 0;
-  int _lastMilestone = 0;
+
+// HUD / FX
+  final GlobalKey _diamondHudKey = GlobalKey();
+  late final AnimationController _diamondPulseCtrl;
+  late final Animation<double> _diamondPulse;
+
+  late final AnimationController hudPulseCtrl;
+  late final Animation<double> hudPulse;
+
+  late double _hudMinPrev;
+  int? _hudMaxPrev;
+  late double _hudNextPrev;
+
+  late final AnimationController electricCtrl;
+  late final Animation<double> electricAnim;
+
+int _lastMilestone = 0;
 
 int _lastMaxAdTriggered = 0;
 int? _pendingDuplicateValue;
@@ -397,25 +414,27 @@ int? _pendingDuplicateValue;
 
   late final AnimationController glowCtrl;
   late final Animation<double> glowAnim;
-late AnimationController hudPulseCtrl;
-late Animation<double> hudPulseAnim;
-late AnimationController electricCtrl;
 
-late final AnimationController energyCtrl;
+  late final AnimationController energyCtrl;
   late final Animation<double> energyAnim;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    _diamondPulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 320));
+    _diamondPulse = CurvedAnimation(parent: _diamondPulseCtrl, curve: Curves.easeOutBack);
+
     glowCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 860))..repeat(reverse: true);
     glowAnim = Tween<double>(begin: 0.24, end: 0.92).animate(CurvedAnimation(parent: glowCtrl, curve: Curves.easeInOut));
     energyCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
 
 // Mini HUD pulse + electric animations
-hudPulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
-hudPulseAnim = CurvedAnimation(parent: hudPulseCtrl, curve: Curves.easeOutCubic);
-electricCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat();
+    hudPulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
+    hudPulse = CurvedAnimation(parent: hudPulseCtrl, curve: Curves.easeOutCubic);
+    electricCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat();
+    electricAnim = CurvedAnimation(parent: electricCtrl, curve: Curves.linear);
     energyAnim = CurvedAnimation(parent: energyCtrl, curve: Curves.linear);
 
     campaignLevels = List.generate(100, (i) => _generateCampaignLevel(i + 1));
@@ -432,6 +451,7 @@ electricCtrl = AnimationController(vsync: this, duration: const Duration(millise
     glowCtrl.dispose();
     energyCtrl.dispose();
     hudPulseCtrl.dispose();
+    _diamondPulseCtrl.dispose();
     electricCtrl.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -961,6 +981,72 @@ void _applyPendingDuplicateIfAny() {
     return Offset(boardPadding + p.c * (cw + cellGap) + cw / 2, boardPadding + p.r * (ch + cellGap) + ch / 2);
   }
 
+
+
+void _playDiamondFlyFx(int amount) {
+  if (amount <= 0) return;
+  if (!mounted) return;
+
+  final overlay = Overlay.of(context);
+  final box = _diamondHudKey.currentContext?.findRenderObject() as RenderBox?;
+  if (overlay == null || box == null) {
+    _diamondPulseCtrl.forward(from: 0);
+    return;
+  }
+
+  final end = box.localToGlobal(box.size.center(Offset.zero));
+  final n = min(6, amount);
+
+  for (int i = 0; i < n; i++) {
+    final ctrl = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 650 + i * 60),
+    );
+
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => Positioned.fill(
+        child: IgnorePointer(
+          child: AnimatedBuilder(
+            animation: ctrl,
+            builder: (context, _) {
+              final t = Curves.easeInOutCubic.transform(ctrl.value.clamp(0.0, 1.0));
+              final start = Offset(end.dx + (i - (n - 1) / 2) * 10.0, end.dy + 140 + i * 6.0);
+              final pos = Offset.lerp(start, end, t)!;
+              final size = lerpDouble(22, 14, t)!;
+              final opacity = (1.0 - t).clamp(0.0, 1.0);
+              return Stack(
+                children: [
+                  Positioned(
+                    left: pos.dx - size / 2,
+                    top: pos.dy - size / 2,
+                    child: Opacity(
+                      opacity: opacity,
+                      child: Icon(Icons.diamond, size: size, color: Colors.white),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    overlay.insert(entry);
+    ctrl.addStatusListener((st) {
+      if (st == AnimationStatus.completed || st == AnimationStatus.dismissed) {
+        entry.remove();
+        ctrl.dispose();
+        _diamondPulseCtrl.forward(from: 0);
+      }
+    });
+
+    ctrl.forward();
+  }
+}
+
+
   Future<void> _shakeCell(Pos p) async {
     final key = _k(p.r, p.c);
     for (final a in [7.0, -6.0, 5.0, -4.0, 2.0, 0.0]) {
@@ -1343,7 +1429,8 @@ appBar: PreferredSize(
   final ultra = w < 360 * ui;
   final compact = w < 420 * ui;
 
-  final gap = (ultra ? 6 : 10) * ui;
+  final gap = (ultra ? 6 : 10) * ui * ((MediaQuery.of(context).size.width < 420) ? 0.65 : 1.0);
+    final hudScale = (MediaQuery.of(context).size.width < 420) ? 0.85 : 1.0;
 
   // Right side fixed buttons
   final iconW = (ultra ? 40 : 46) * ui;
@@ -1365,7 +1452,50 @@ appBar: PreferredSize(
         ),
       );
 
-  final swapBtn = slot(
+  
+Widget diamondHud() {
+  final scale = (MediaQuery.of(context).size.width < 420) ? 0.85 : 1.0;
+  final pulse = 1.0 + (0.08 * _diamondPulse.value);
+  return Transform.scale(
+    scale: scale * pulse,
+    child: Container(
+      key: _diamondHudKey,
+      padding: EdgeInsets.symmetric(horizontal: 12 * ui, vertical: 8 * ui),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        gradient: LinearGradient(
+          colors: [
+            Colors.white.withOpacity(0.22),
+            Colors.white.withOpacity(0.10),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: Colors.white.withOpacity(0.35), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.white.withOpacity(0.12),
+            blurRadius: 14,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.diamond, size: 18 * ui, color: Colors.white),
+          SizedBox(width: 8 * ui),
+          Text(
+            diamonds.toString(),
+            style: _neon(Colors.white, 16 * ui).copyWith(fontWeight: FontWeight.w800, letterSpacing: 0.2),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+final swapBtn = slot(
     hudBtn(
       icon: swapMode ? Icons.close : Icons.swap_horiz,
       title: 'SWAP',
@@ -1413,21 +1543,6 @@ final adBtn = slot(
     ),
   );
 
-  final restartBtn = SizedBox(
-    width: iconW,
-    child: IconButton(
-      tooltip: lang == AppLang.de ? 'Neustart' : 'Restart',
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(),
-      onPressed: () {
-        _startLevel(levelIdx, hardReset: true);
-        _rebuildValueColorMapFromGrid();
-      },
-      icon: const Icon(Icons.restart_alt),
-      iconSize: (ultra ? 22 : 24) * ui,
-    ),
-  );
-
   final settingsBtn = SizedBox(
     width: iconW,
     child: PopupMenuButton<String>(
@@ -1436,6 +1551,15 @@ final adBtn = slot(
       icon: const Icon(Icons.settings),
       iconSize: (ultra ? 22 : 24) * ui,
       onSelected: (v) async {
+
+if (v == 'restart') {
+  _startLevel(levelIdx, hardReset: true);
+  _rebuildValueColorMapFromGrid();
+  await _saveProgress();
+  if (mounted) setState(() {});
+  return;
+}
+
         setState(() {
           if (v == 'lang_de') lang = AppLang.de;
           if (v == 'lang_en') lang = AppLang.en;
@@ -1451,6 +1575,18 @@ final adBtn = slot(
         const PopupMenuDivider(),
         PopupMenuItem(value: 'sfx', child: Text('${t('sfx')}: ${sfxOn ? "ON" : "OFF"}')),
         PopupMenuItem(value: 'fx_high', child: Text('${t('fx')}: ${t('high')}')),
+
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'restart',
+          child: Row(
+            children: [
+              const Icon(Icons.restart_alt, size: 18),
+              const SizedBox(width: 10),
+              Text(lang == AppLang.de ? 'Neustart' : 'Restart'),
+            ],
+          ),
+        ),
         PopupMenuItem(value: 'fx_low', child: Text('${t('fx')}: ${t('low')}')),
       ],
     ),
@@ -1463,9 +1599,9 @@ final adBtn = slot(
           children: [
             diamondsChip,
             SizedBox(width: gap),
-            adBtn,
+            Transform.scale(scale: hudScale, child: adBtn),
             SizedBox(width: gap),
-            swapBtn,
+            Transform.scale(scale: hudScale, child: swapBtn),
             SizedBox(width: gap),
           ],
         ),
@@ -1474,7 +1610,7 @@ final adBtn = slot(
       Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          restartBtn,
+          
           SizedBox(width: gap),
           settingsBtn,
         ],
@@ -1602,7 +1738,7 @@ if (_isLevelGoalCompleted() && mounted) {
 
         if (selected.contains(key)) return;
 
-        if (!_canLink(last, p)) {
+        if (!_canLinkPath(path, p)) {
           _shakeCell(p);
           return;
         }
@@ -1669,6 +1805,7 @@ if (comboLen >= 11) {
 }
 if (dAdd > 0) {
   diamonds += dAdd;
+  _playDiamondFlyFx(dAdd);
   _showToast('+$dAdd 💎');
 }
 
@@ -2131,26 +2268,85 @@ children.add(
     return (dr + dc) == 1;
   }
 
-  bool _canLink(Pos a, Pos b) {
-    if (!_isOrthogonalOneStep(a, b)) return false;
-    final va = grid[a.r][a.c].value;
-    final vb = grid[b.r][b.c].value;
-    // Basic rule: chain only equal values (common merge rule).
-    return va == vb && va > 0;
-  }
+  // Path linking rules:
+// - 8-direction adjacency (including diagonal)
+// - Chain can start with many same "base" tiles.
+// - After you have at least 2 base tiles (thus a merge result), you may continue by linking
+//   to a tile whose value equals the current merged result, doubling the merged result each time.
+bool _canLinkPath(List<Pos> path, Pos next) {
+  if (path.isEmpty) return false;
+  final last = path.last;
+  if (!_isOrthogonalOneStep(last, next)) return false; // now 8-dir
+  if (path.contains(next)) return false;
 
-  int _mergedValue(List<Pos> chain) {
-    if (chain.isEmpty) return 0;
-    final base = grid[chain.first.r][chain.first.c].value;
-    // Merge result doubles with each extra tile in the chain.
-    int v = base;
-    for (int i = 1; i < chain.length; i++) {
-      v = v * 2;
+  final base = grid[path.first.r][path.first.c].value;
+  final vNext = grid[next.r][next.c].value;
+  if (vNext <= 0) return false;
+
+  // Validate the existing path and compute current merged value + phase.
+  int baseCount = 1;
+  bool inUpPhase = false;
+  int cur = base;
+
+  for (int i = 1; i < path.length; i++) {
+    final v = grid[path[i].r][path[i].c].value;
+    if (!inUpPhase && v == base) {
+      baseCount++;
+      cur = base << (baseCount - 1); // base * 2^(baseCount-1)
+      continue;
     }
-    return v;
+    // Start/continue "up" phase: must match current merged value.
+    if (v == cur) {
+      inUpPhase = true;
+      cur = cur << 1;
+      continue;
+    }
+    return false;
   }
 
-  String _praise(int combo) {
+  // Next allowed values:
+  // - Still in base phase: can take another base tile, or can start up-phase by taking current merged value (needs at least 2 base tiles).
+  // - In up-phase: must take current merged value.
+  if (!inUpPhase) {
+    if (vNext == base) return true;
+    if (baseCount >= 2 && vNext == cur) return true;
+    return false;
+  } else {
+    return vNext == cur;
+  }
+}
+
+int _mergedValue(List<Pos> path) {
+  if (path.isEmpty) return 0;
+  final base = grid[path.first.r][path.first.c].value;
+
+  int baseCount = 1;
+  bool inUpPhase = false;
+  int cur = base;
+
+  for (int i = 1; i < path.length; i++) {
+    final v = grid[path[i].r][path[i].c].value;
+    if (!inUpPhase && v == base) {
+      baseCount++;
+      cur = base << (baseCount - 1);
+      continue;
+    }
+    if (v == cur) {
+      inUpPhase = true;
+      cur = cur << 1;
+      continue;
+    }
+    // If the path is invalid, fall back to legacy behavior.
+    return base << (path.length - 1);
+  }
+  // When inUpPhase, `cur` has already been doubled for the last matched tile,
+  // so the merged value is:
+  // - base-phase only: base * 2^(baseCount-1)
+  // - up-phase: cur / 2
+  return inUpPhase ? (cur >> 1) : cur;
+}
+
+String _praise(int combo) {
     if (combo >= 12) return t('comboLegendary');
     if (combo >= 9) return t('comboEpic');
     if (combo >= 6) return t('comboGreat');
@@ -2158,7 +2354,6 @@ children.add(
     return t('comboGood');
   }
 
-  int? _hudMaxPrev;
 
 }
 
