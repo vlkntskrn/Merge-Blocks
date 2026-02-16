@@ -1449,7 +1449,7 @@ Widget build(BuildContext context) {
 
 
 appBar: PreferredSize(
-  preferredSize: Size.fromHeight(78 * ui),
+  preferredSize: Size.fromHeight((78 * ui) * 1.75),
   child: SafeArea(
     bottom: false,
     child: Container(
@@ -1457,7 +1457,7 @@ appBar: PreferredSize(
         color: Color(0xFF17132C),
         boxShadow: [BoxShadow(color: Color(0x66000000), blurRadius: 18, offset: Offset(0, 10))],
       ),
-      padding: EdgeInsets.fromLTRB(8 * ui, 8 * ui, 14 * ui, 8 * ui),
+      padding: EdgeInsets.fromLTRB(10 * ui, 12 * ui, 16 * ui, 12 * ui),
       child: LayoutBuilder(
         builder: (context, c) {
           final compact = c.maxWidth < 420 * ui;
@@ -1500,9 +1500,9 @@ appBar: PreferredSize(
 final nextV = _maxTileBig() <= BigInt.zero ? BigInt.from(2) : (_maxTileBig() * BigInt.from(2));
 
 final nextChip = SizedBox(
-  width: ultra ? (74 * ui) : (compact ? (88 * ui) : (104 * ui)),
+  width: ultra ? (110 * ui) : (compact ? (124 * ui) : (140 * ui)),
   child: Transform.scale(
-    scale: ultra ? 0.78 : (compact ? 0.86 : 0.92),
+    scale: ultra ? 1.45 : (compact ? 1.60 : 1.75),
     alignment: Alignment.center,
     child: Container(
       padding: EdgeInsets.symmetric(horizontal: 10 * ui, vertical: 10 * ui),
@@ -1530,7 +1530,7 @@ final nextChip = SizedBox(
             style: TextStyle(
               color: Colors.white.withOpacity(0.92),
               fontWeight: FontWeight.w900,
-              fontSize: 10 * ui,
+              fontSize: 18.0 * ui,
               letterSpacing: 0.2,
             ),
           ),
@@ -1540,7 +1540,7 @@ final nextChip = SizedBox(
             style: TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.w900,
-              fontSize: 14.5 * ui,
+              fontSize: 26.0 * ui,
               shadows: [Shadow(color: Colors.black.withOpacity(0.55), blurRadius: 6)],
             ),
           ),
@@ -1661,7 +1661,7 @@ body: SafeArea(
         child: Column(
           children: [
             // Mini HUD removed (MIN/MAX removed, NEXT moved to app bar)
-            SizedBox(height: 4 * ui),
+            SizedBox(height: 0),
 
             // Board: maksimum alan (sağ/sol panel ve banner yok)
             Expanded(
