@@ -336,7 +336,7 @@ void _onCellDown(Pos p) {
   _pathColors.clear();
   _baseValue = v;
   _baseCount = 1;
-  _armed = true; // old-version behavior: no base-pair arming needed
+  _armed = false;
   _stageValue = null;
   _stageCount = 0;
   _lastValue = v;
@@ -348,22 +348,32 @@ void _onCellDown(Pos p) {
 
 void _recalcPathState() {
   if (_path.isEmpty) {
+    _armed = false;
     _baseValue = null;
     _baseCount = 0;
-    _armed = false;
     _stageValue = null;
     _stageCount = 0;
     _lastValue = null;
     return;
   }
   _baseValue = _valueAt(_path.first);
-  _baseCount = _baseValue == null ? 0 : 1;
-  _armed = true; // old-version behavior: no base-pair arming needed
-  _stageValue = null;
-  _stageCount = 0;
-  _lastValue = _valueAt(_path.last);
-}
+  _baseCount = 0;
+  for (final p in _path) {
+    if (_valueAt(p) == _baseValue) {
+      _baseCount++;
+    } else {
+      break;
+    }
+  }
+  _armed = _baseCount >= 2;
 
+  // Determine current stage and last value.
+  _lastValue = _armed ? _valueAt(_path.last) : _baseValue;
+
+  // Stage is the last value in the chain (after arming).
+  _stageValue = _armed ? _valueAt(_path.last) : null;
+  _stageCount = _armed ? 1 : 0;
+}
 
 void _onCellEnter(Pos p) {
   if (_path.isEmpty) return;
@@ -386,18 +396,28 @@ void _onCellEnter(Pos p) {
   final v = _valueAt(p);
   if (v == null) return;
 
-  // Rule: the chain must start with an equal-value pair.
-  // i.e. the first extension (2nd picked tile) must equal the starting tile.
-  if (_path.length == 1) {
-    final base = _valueAt(_path.first);
-    if (base == null || v != base) return;
+  // Rule:
+  // - First, we must form a base pair: the first two picks must be the same value.
+  // - After the base pair is formed, every next pick must be either:
+  //   * same as the last picked value, OR
+  //   * exactly double the last picked value.
+  if (!_armed) {
+    if (_baseValue == null) return;
+    if (v != _baseValue) return;
+
+    _path.add(p);
+    _pathColors.add(_chainColorForIndex(_path.length - 1));
+    _baseCount++;
+
+    if (_baseCount >= 2) {
+      _armed = true;
+      _lastValue = v;
+    }
+    setState(() {});
+    return;
   }
 
-  // Old-version rule:
-  // Next pick must be same or double of the previous pick (no base-pair arming).
-  final lv = _lastValue ?? _valueAt(last);
-  if (lv == null) return;
-
+  final lv = _lastValue ?? _baseValue!;
   if (v == lv || v == (lv << 1)) {
     _path.add(p);
     _pathColors.add(_chainColorForIndex(_path.length - 1));
@@ -405,7 +425,6 @@ void _onCellEnter(Pos p) {
     setState(() {});
   }
 }
-
 
 
 void _recomputeSelectionState() {
@@ -473,57 +492,73 @@ void _applyMergeChain(List<Pos> chain) {
     return;
   }
 
+  // Collect values along the selected chain (stop if we hit an empty cell).
+  final vals = <BigInt>[];
   final pos = <Pos>[];
-  BigInt sum = BigInt.zero;
-
   for (final p in chain) {
     final v = _valueAt(p);
     if (v == null) break;
+    vals.add(v);
     pos.add(p);
-    sum += v;
   }
 
-  if (pos.length < 2) {
+  // Need at least 2 tiles to merge.
+  if (vals.length < 2) {
     _clearPath();
     setState(() {});
     return;
   }
 
-  // Old-version merge math:
-  // merged = next power-of-two >= max(2, sum(values))
-  BigInt target = BigInt.one;
-  final minNeed = sum < BigInt.from(2) ? BigInt.from(2) : sum;
-  while (target < minNeed) {
-    target = target << 1;
+  // OLD-VERSION merge math:
+  // Merge result is based on the SUM of selected tiles, rounded up to the nearest power of 2.
+  // Examples:
+  //   2+2 = 4
+  //   2+4 = 6 -> 8
+  //   4+4+8 = 16 -> 16
+  BigInt sum = BigInt.zero;
+  for (final v in vals) {
+    sum += v;
   }
 
-  // Clear all but the final (target) position.
+  // Minimum result is 2.
+  if (sum < BigInt.from(2)) sum = BigInt.from(2);
+
+  BigInt merged;
+  if (sum == BigInt.zero) {
+    merged = BigInt.from(2);
+  } else {
+    final bl = sum.bitLength; // >= 1 for sum > 0
+    final lower = BigInt.one << (bl - 1);
+    merged = (lower == sum) ? sum : (BigInt.one << bl);
+    if (merged < BigInt.from(2)) merged = BigInt.from(2);
+  }
+
+  // Commit:
+  // - Target is the last selected position.
+  // - All previous selected tiles are cleared.
   for (int i = 0; i < pos.length - 1; i++) {
     final p = pos[i];
     grid[p.r][p.c] = null;
   }
-
   final targetPos = pos.last;
-  grid[targetPos.r][targetPos.c] = target;
+  grid[targetPos.r][targetPos.c] = merged;
 
-  // Keep scoring minimal and consistent: award merged value.
-  score += target;
+  // Scoring / combo: keep the rest of the game logic intact.
+  score += merged;
   _recalcBest();
 
   _clearPath();
 
-  // Let existing gravity + spawn animation system handle refills.
+  // IMPORTANT: do NOT run _cascadeFrom (it changes the old behaviour).
   _collapseAndFill();
 
-  // Treat "combo" as number of tiles consumed.
-  _handleCombo(max(0, pos.length - 1));
+  _handleCombo(pos.length - 1);
   _checkGoalAndMaybeAdvance();
   _maybeShowNextLevelReward();
   _saveGame();
 
   setState(() {});
 }
-
 
 
 void _cascadeFrom(Pos start) {
@@ -1035,7 +1070,6 @@ void _collapseAndFill() {
                         height: cellSize,
                         child: _cellWidget(Pos(r, c), cellSize),
                       ),
-                  
                   // Vanish FX for consumed tiles
                   for (final fx in _vanishFx)
                     Positioned(
@@ -1095,9 +1129,6 @@ if (_path.length >= 2)
   final top = _lighten(baseColor, 0.08);
   final bottom = _darken(baseColor, 0.16);
 
-  // Pointer handling is done at the board level (GestureDetector) for stable
-  // drag-selection across cells. Per-cell pointer listeners can cause the chain
-  // to stop after the first link on some devices.
   return TweenAnimationBuilder<double>(
       key: ValueKey('fall_${p.r}_${p.c}_${v?.toString() ?? "n"}_${_spawnTick}'),
       tween: Tween<double>(begin: beginDy, end: 0.0),
@@ -1199,16 +1230,7 @@ if (_path.length >= 2)
               onTap: _openShopSheet,
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _actionButton(
-              icon: Icons.pause,
-              label: t('pause'),
-              sub: '',
-              active: false,
-              onTap: _openPauseDialog,
-            ),
-          ),
+
         ],
       ),
     );
