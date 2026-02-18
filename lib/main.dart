@@ -336,7 +336,7 @@ void _onCellDown(Pos p) {
   _pathColors.clear();
   _baseValue = v;
   _baseCount = 1;
-  _armed = false;
+  _armed = true; // old-version behavior: no base-pair arming needed
   _stageValue = null;
   _stageCount = 0;
   _lastValue = v;
@@ -348,32 +348,22 @@ void _onCellDown(Pos p) {
 
 void _recalcPathState() {
   if (_path.isEmpty) {
-    _armed = false;
     _baseValue = null;
     _baseCount = 0;
+    _armed = false;
     _stageValue = null;
     _stageCount = 0;
     _lastValue = null;
     return;
   }
   _baseValue = _valueAt(_path.first);
-  _baseCount = 0;
-  for (final p in _path) {
-    if (_valueAt(p) == _baseValue) {
-      _baseCount++;
-    } else {
-      break;
-    }
-  }
-  _armed = _baseCount >= 2;
-
-  // Determine current stage and last value.
-  _lastValue = _armed ? _valueAt(_path.last) : _baseValue;
-
-  // Stage is the last value in the chain (after arming).
-  _stageValue = _armed ? _valueAt(_path.last) : null;
-  _stageCount = _armed ? 1 : 0;
+  _baseCount = _baseValue == null ? 0 : 1;
+  _armed = true; // old-version behavior: no base-pair arming needed
+  _stageValue = null;
+  _stageCount = 0;
+  _lastValue = _valueAt(_path.last);
 }
+
 
 void _onCellEnter(Pos p) {
   if (_path.isEmpty) return;
@@ -396,28 +386,18 @@ void _onCellEnter(Pos p) {
   final v = _valueAt(p);
   if (v == null) return;
 
-  // Rule:
-  // - First, we must form a base pair: the first two picks must be the same value.
-  // - After the base pair is formed, every next pick must be either:
-  //   * same as the last picked value, OR
-  //   * exactly double the last picked value.
-  if (!_armed) {
-    if (_baseValue == null) return;
-    if (v != _baseValue) return;
-
-    _path.add(p);
-    _pathColors.add(_chainColorForIndex(_path.length - 1));
-    _baseCount++;
-
-    if (_baseCount >= 2) {
-      _armed = true;
-      _lastValue = v;
-    }
-    setState(() {});
-    return;
+  // Rule: the chain must start with an equal-value pair.
+  // i.e. the first extension (2nd picked tile) must equal the starting tile.
+  if (_path.length == 1) {
+    final base = _valueAt(_path.first);
+    if (base == null || v != base) return;
   }
 
-  final lv = _lastValue ?? _baseValue!;
+  // Old-version rule:
+  // Next pick must be same or double of the previous pick (no base-pair arming).
+  final lv = _lastValue ?? _valueAt(last);
+  if (lv == null) return;
+
   if (v == lv || v == (lv << 1)) {
     _path.add(p);
     _pathColors.add(_chainColorForIndex(_path.length - 1));
@@ -425,6 +405,7 @@ void _onCellEnter(Pos p) {
     setState(() {});
   }
 }
+
 
 
 void _recomputeSelectionState() {
@@ -492,79 +473,57 @@ void _applyMergeChain(List<Pos> chain) {
     return;
   }
 
-  final vals = <BigInt>[];
   final pos = <Pos>[];
+  BigInt sum = BigInt.zero;
+
   for (final p in chain) {
     final v = _valueAt(p);
     if (v == null) break;
-    vals.add(v);
     pos.add(p);
-  }
-  if (vals.length < 2) {
-    _clearPath();
-    return;
+    sum += v;
   }
 
-  // Stack-merge simulation on the selected sequence.
-  // We only commit the *longest prefix* that collapses into a single value.
-  final stack = <BigInt>[];
-  int bestN = 0;
-  BigInt bestMerged = BigInt.zero;
-  BigInt bestScoreAdd = BigInt.zero;
-  int bestMerges = 0;
-
-  BigInt scoreAcc = BigInt.zero;
-  int mergesAcc = 0;
-
-  for (int i = 0; i < vals.length; i++) {
-    stack.add(vals[i]);
-    // Merge while top two equal
-    while (stack.length >= 2 && stack[stack.length - 1] == stack[stack.length - 2]) {
-      final v = stack.removeLast();
-      stack.removeLast();
-      final nv = v << 1;
-      stack.add(nv);
-      scoreAcc += nv;
-      mergesAcc += 1;
-    }
-    if (i >= 1 && stack.length == 1) {
-      bestN = i + 1;
-      bestMerged = stack.single;
-      bestScoreAdd = scoreAcc;
-      bestMerges = mergesAcc;
-    }
-  }
-
-  // Need at least 1 merge (2 tiles).
-  if (bestN < 2) {
+  if (pos.length < 2) {
     _clearPath();
     setState(() {});
     return;
   }
 
-  // Clear used tiles
-  for (int i = 0; i < bestN; i++) {
+  // Old-version merge math:
+  // merged = next power-of-two >= max(2, sum(values))
+  BigInt target = BigInt.one;
+  final minNeed = sum < BigInt.from(2) ? BigInt.from(2) : sum;
+  while (target < minNeed) {
+    target = target << 1;
+  }
+
+  // Clear all but the final (target) position.
+  for (int i = 0; i < pos.length - 1; i++) {
     final p = pos[i];
     grid[p.r][p.c] = null;
   }
 
-  final targetPos = pos[bestN - 1];
-  grid[targetPos.r][targetPos.c] = bestMerged;
+  final targetPos = pos.last;
+  grid[targetPos.r][targetPos.c] = target;
 
-  score += bestScoreAdd;
+  // Keep scoring minimal and consistent: award merged value.
+  score += target;
   _recalcBest();
 
   _clearPath();
-  _cascadeFrom(targetPos);
+
+  // Let existing gravity + spawn animation system handle refills.
   _collapseAndFill();
 
-  _handleCombo(bestMerges);
+  // Treat "combo" as number of tiles consumed.
+  _handleCombo(max(0, pos.length - 1));
   _checkGoalAndMaybeAdvance();
   _maybeShowNextLevelReward();
   _saveGame();
 
   setState(() {});
 }
+
 
 
 void _cascadeFrom(Pos start) {
@@ -1136,11 +1095,10 @@ if (_path.length >= 2)
   final top = _lighten(baseColor, 0.08);
   final bottom = _darken(baseColor, 0.16);
 
-  return Listener(
-    onPointerDown: (_) => _onCellDown(p),
-    onPointerMove: (_) => _onCellEnter(p),
-    onPointerUp: (_) => _onCellUp(),
-    child: TweenAnimationBuilder<double>(
+  // Pointer handling is done at the board level (GestureDetector) for stable
+  // drag-selection across cells. Per-cell pointer listeners can cause the chain
+  // to stop after the first link on some devices.
+  return TweenAnimationBuilder<double>(
       key: ValueKey('fall_${p.r}_${p.c}_${v?.toString() ?? "n"}_${_spawnTick}'),
       tween: Tween<double>(begin: beginDy, end: 0.0),
       duration: const Duration(milliseconds: 260),
@@ -1189,8 +1147,7 @@ if (_path.length >= 2)
                 ),
         ),
       ),
-    ),
-  );
+    );
 }
 
 
