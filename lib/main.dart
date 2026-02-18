@@ -1,11 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MergeBlocksApp());
 }
 
@@ -40,6 +37,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   // ===== Board config =====
   static const int cols = 5;
   static const int rows = 8;
+  static const double kGap = 10.0;
   static const double kBannerHeight = 60.0; // fixed banner height (Phase 1)
 
   final Random _rng = Random();
@@ -51,24 +49,30 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   BigInt best = BigInt.zero;
   int diamonds = 0; // starts with 0 diamonds
 
-  // ===== Phase 2: combo + reward animation anchors =====
-  final GlobalKey _diamondKey = GlobalKey();
-  final GlobalKey _boardKey = GlobalKey();
-  bool _levelRewardDialogOpen = false;
-  final List<BigInt> _pendingLevelRewards = [];
-
   bool swapMode = false;
   bool hammerMode = false;
   Pos? _swapFirst;
 
   final List<Pos> _path = [];
-  BigInt? _pathValue;
-  int _segmentCount = 0; // tiles selected in the current value segment
+  final List<Color> _pathColors = <Color>[]; // per-segment chain line colors
   bool _dragging = false;
 
-  // Gravity fall animation for moved/spawned tiles
+  // Tick used to force rebuild keys for spawn animations.
+  int _spawnTick = 0;
+
+
+  BigInt? _lastValue; // last value in current selection
   final Map<Pos, int> _fallSteps = <Pos, int>{};
-  int _fallTick = 0;
+  final List<_VanishFx> _vanishFx = <_VanishFx>[];
+  // Last combo count (merges in a single move).
+  int _lastCombo = 0;
+
+  // Chain selection state (rebuilt)
+  BigInt? _baseValue;
+  int _baseCount = 0;
+  bool _armed = false;
+  BigInt? _stageValue;
+  int _stageCount = 0;
 
   String? _toast;
   Timer? _toastTimer;
@@ -92,16 +96,6 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'broken': 'Broken!',
     'shopTitle': 'Diamond Shop',
     'buy': 'Buy',
-
-'superCombo': 'Super Combo',
-'greatCombo': 'Great Combo',
-'megaCombo': 'Mega Combo',
-'rewardTitle': 'Level Reward',
-'rewardCta': 'Watch ad → Get reward',
-'noThanks': 'No thanks',
-'watchingAd': 'Watching ad…',
-'rewardGranted': 'Reward granted!',
-    'noMerge': 'No merge',
   };
 
   static const Map<String, String> _de = {
@@ -120,16 +114,6 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'broken': 'Zerbrochen!',
     'shopTitle': 'Diamant-Shop',
     'buy': 'Kaufen',
-
-'superCombo': 'Super-Kombo',
-'greatCombo': 'Großartige Kombo',
-'megaCombo': 'Mega-Kombo',
-'rewardTitle': 'Level-Belohnung',
-'rewardCta': 'Werbung ansehen → Belohnung',
-'noThanks': 'Nein danke',
-'watchingAd': 'Werbung läuft…',
-'rewardGranted': 'Belohnung erhalten!',
-    'noMerge': 'Kein Merge',
   };
 
   static const Map<String, String> _tr = {
@@ -148,16 +132,6 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'broken': 'Kırıldı!',
     'shopTitle': 'Elmas Mağazası',
     'buy': 'Satın al',
-
-'superCombo': 'Süper Kombo',
-'greatCombo': 'Harika Kombo',
-'megaCombo': 'Muhteşem Kombo',
-'rewardTitle': 'Seviye Ödülü',
-'rewardCta': 'Reklam izle → Ödül al',
-'noThanks': 'Hayır',
-'watchingAd': 'Reklam izleniyor…',
-'rewardGranted': 'Ödül alındı!',
-    'noMerge': 'Birleşme yok',
   };
 
   String t(String key) {
@@ -169,105 +143,10 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     return dict[key] ?? key;
   }
 
-  
-  static const String _kPrefsKey = 'merge_blocks_save_v1';
-
-  Future<void> _loadGame() async {
-    try {
-      grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_kPrefsKey);
-      if (raw == null || raw.isEmpty) {
-        _resetBoard(hard: true);
-                    _clearSavedGame();
-        return;
-      }
-      final map = jsonDecode(raw) as Map<String, dynamic>;
-      final savedRows = (map['rows'] as int?) ?? rows;
-      final savedCols = (map['cols'] as int?) ?? cols;
-      if (savedRows != rows || savedCols != cols) {
-        _resetBoard(hard: true);
-                    _clearSavedGame();
-        return;
-      }
-
-      final gridList = (map['grid'] as List?) ?? const [];
-      for (int r = 0; r < rows; r++) {
-        for (int c = 0; c < cols; c++) {
-          BigInt? v;
-          if (r < gridList.length) {
-            final row = gridList[r];
-            if (row is List && c < row.length) {
-              final cell = row[c];
-              if (cell is String && cell.isNotEmpty) {
-                v = BigInt.tryParse(cell);
-              } else if (cell is int) {
-                v = BigInt.from(cell);
-              }
-            }
-          }
-          grid[r][c] = v;
-        }
-      }
-
-      score = BigInt.tryParse(map['score']?.toString() ?? '') ?? BigInt.zero;
-      diamonds = (map['diamonds'] as int?) ?? 0;
-      levelIdx = (map['level'] as int?) ?? 1;
-
-      final langStr = map['lang']?.toString();
-      if (langStr == 'de') lang = AppLang.de;
-      if (langStr == 'en') lang = AppLang.en;
-
-      _recalcBest();
-      // Spawn is derived from the current max tile, so no extra state is required.
-      _updateSpawnCapsFromMax();
-      setState(() {});
-    } catch (_) {
-      _resetBoard(hard: true);
-                    _clearSavedGame();
-    }
-  }
-
-  // Kept for backward compatibility with older saves/versions.
-  // Spawn pool is computed on demand from the max tile, so this is intentionally a no-op.
-  void _updateSpawnCapsFromMax() {}
-
-  Future<void> _saveGame() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final gridOut = [
-        for (int r = 0; r < rows; r++)
-          [
-            for (int c = 0; c < cols; c++)
-              grid[r][c]?.toString(),
-          ],
-      ];
-      final map = <String, dynamic>{
-        'rows': rows,
-        'cols': cols,
-        'grid': gridOut,
-        'score': score.toString(),
-        'diamonds': diamonds,
-        'level': levelIdx,
-        'lang': lang.name,
-      };
-      await prefs.setString(_kPrefsKey, jsonEncode(map));
-    } catch (_) {
-      // ignore
-    }
-  }
-
-  Future<void> _clearSavedGame() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_kPrefsKey);
-    } catch (_) {}
-  }
-
-@override
+  @override
   void initState() {
     super.initState();
-    _loadGame();
+    _resetBoard(hard: true);
   }
 
   @override
@@ -289,29 +168,38 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     }
     _recalcBest();
     setState(() {});
-    _saveGame();
   }
 
   void _initFirstBoard() {
-    // Opening board must be FULL (no empty cells) and contain ONLY:
-    // 2, 4, 8, 16, 32, 64. Also guarantee at least one of each value.
-    const allowedInts = <int>[2, 4, 8, 16, 32, 64];
-    final allowed = allowedInts.map(BigInt.from).toList(growable: false);
+    // Board on first open must contain 2,4,8,16,32,64 blocks.
+    // We keep the board full (current game style) but guarantee at least one of each.
+    final required = <BigInt>[
+      BigInt.from(2),
+      BigInt.from(4),
+      BigInt.from(8),
+      BigInt.from(16),
+      BigInt.from(32),
+      BigInt.from(64),
+    ];
 
-    final totalCells = rows * cols;
-    final tiles = <BigInt>[];
-    tiles.addAll(allowed); // guarantee at least one of each
-
-    while (tiles.length < totalCells) {
-      tiles.add(allowed[_rng.nextInt(allowed.length)]);
-    }
-    tiles.shuffle(_rng);
-
-    int idx = 0;
+    final allPositions = <Pos>[];
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < cols; c++) {
-        grid[r][c] = tiles[idx++];
+        allPositions.add(Pos(r, c));
       }
+    }
+    allPositions.shuffle(_rng);
+
+    // Place required values first.
+    for (int i = 0; i < required.length && i < allPositions.length; i++) {
+      final p = allPositions[i];
+      grid[p.r][p.c] = required[i];
+    }
+
+    // Fill the rest using the smart spawn pool (Phase 1).
+    for (int i = required.length; i < allPositions.length; i++) {
+      final p = allPositions[i];
+      grid[p.r][p.c] = _spawnTile();
     }
   }
 
@@ -375,481 +263,387 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     return (dr <= 1 && dc <= 1) && !(dr == 0 && dc == 0);
   }
 
-  void _clearPath() {
-    _path.clear();
-    _pathValue = null;
-    _segmentCount = 0;
-    _dragging = false;
+
+  Pos? _hitTestPos(Offset local, double cellSize, double gap) {
+    final span = cellSize + gap;
+    int c = ((local.dx + gap / 2) / span).floor();
+    int r = ((local.dy + gap / 2) / span).floor();
+    if (r < 0 || r >= rows || c < 0 || c >= cols) return null;
+    return Pos(r, c);
   }
 
-  void _onCellDown(Pos p) {
-    if (!_inBounds(p)) return;
-    final v = grid[p.r][p.c];
+
+void _clearPath() {
+  _path.clear();
+  _pathColors.clear();
+  _dragging = false;
+  _baseValue = null;
+  _baseCount = 0;
+  _armed = false;
+  _stageValue = null;
+    _stageCount = 0;
+}
+
+BigInt? _valueAt(Pos p) => _inBounds(p) ? grid[p.r][p.c] : null;
+
+Color _chainColorForStep(int step) {
+  const palette = <Color>[
+    Color(0xFF7AA7FF),
+    Color(0xFF7FE3C3),
+    Color(0xFFFFC58A),
+    Color(0xFFD7A8FF),
+    Color(0xFFFF9FB3),
+    Color(0xFFA9E2FF),
+    Color(0xFFCBEA8D),
+    Color(0xFFF2E38B),
+  ];
+  return palette[step % palette.length].withOpacity(0.78);
+}
+
+void _onCellDown(Pos p) {
+  if (!_inBounds(p)) return;
+  final v = _valueAt(p);
+  if (v == null) return;
+
+  // Tool modes take priority
+  if (swapMode) {
+    _handleSwapTap(p);
+    return;
+  }
+  if (hammerMode) {
+    _handleHammerTap(p);
+    return;
+  }
+
+  // Start a new drag/selection session (needed so _onCellUp can commit merge).
+  _dragging = true;
+
+  _path.clear();
+  _pathColors.clear();
+  _baseValue = v;
+  _baseCount = 1;
+  _armed = false;
+  _stageValue = null;
+  _stageCount = 0;
+  _lastValue = v;
+
+  _path.add(p);
+  _pathColors.add(_chainColorForIndex(0));
+  setState(() {});
+}
+
+void _onCellEnter(Pos p) {
+  if (_path.isEmpty) return;
+  if (!_inBounds(p)) return;
+  if (_path.contains(p)) return;
+
+  final last = _path.last;
+  if (!_isNeighbor8(last, p)) return;
+
+  final v = _valueAt(p);
+  if (v == null) return;
+
+  // Rule:
+  // - First, we must form a base pair: the first two picks must be the same value.
+  // - After the base pair is formed, every next pick must be either:
+  //   * same as the last picked value, OR
+  //   * exactly double the last picked value.
+  if (!_armed) {
+    if (_baseValue == null) return;
+    if (v != _baseValue) return;
+
+    _path.add(p);
+    _pathColors.add(_chainColorForIndex(_path.length - 1));
+    _baseCount++;
+
+    if (_baseCount >= 2) {
+      _armed = true;
+      _lastValue = v;
+    }
+    setState(() {});
+    return;
+  }
+
+  final lv = _lastValue ?? _baseValue!;
+  if (v == lv || v == (lv << 1)) {
+    _path.add(p);
+    _pathColors.add(_chainColorForIndex(_path.length - 1));
+    _lastValue = v;
+    setState(() {});
+  }
+}
+
+
+void _recomputeSelectionState() {
+  _armed = false;
+  _baseValue = null;
+  _baseCount = 0;
+  _stageValue = null;
+  _stageCount = 0;
+
+  if (_path.isEmpty) return;
+
+  final firstV = _valueAt(_path.first);
+  if (firstV == null) return;
+
+  _baseValue = firstV;
+
+  // count initial same-value run
+  int i = 0;
+  while (i < _path.length && _valueAt(_path[i]) == firstV) {
+    i++;
+  }
+  _baseCount = i;
+
+  if (_baseCount >= 2) {
+    _armed = true;
+    _stageValue = firstV;
+    _stageCount = _baseCount;
+
+    // walk remaining selections enforcing: same stage, or (stage even) -> next stage
+    for (int j = i; j < _path.length; j++) {
+      final v = _valueAt(_path[j]);
+      if (v == null) break;
+      final sv = _stageValue!;
+      if (v == sv) {
+        _stageCount++;
+        continue;
+      }
+      if (_stageCount >= 2 && _stageCount.isEven && v == (sv << 1)) {
+        _stageValue = sv << 1;
+        _stageCount = 1;
+        continue;
+      }
+      break;
+    }
+  }
+  _lastValue = null;
+}
+
+
+void _onCellUp() {
+  if (!_dragging) return;
+  _dragging = false;
+
+  if (_path.length >= 2) {
+    _applyMergeChain(_path.toList());
+  } else {
+    _clearPath();
+    setState(() {});
+  }
+}
+
+void _applyMergeChain(List<Pos> chain) {
+  if (chain.length < 2) {
+    _clearPath();
+    return;
+  }
+
+  final vals = <BigInt>[];
+  final pos = <Pos>[];
+  for (final p in chain) {
+    final v = _valueAt(p);
+    if (v == null) break;
+    vals.add(v);
+    pos.add(p);
+  }
+  if (vals.length < 2) {
+    _clearPath();
+    return;
+  }
+
+  // Stack-merge simulation on the selected sequence.
+  // We only commit the *longest prefix* that collapses into a single value.
+  final stack = <BigInt>[];
+  int bestN = 0;
+  BigInt bestMerged = BigInt.zero;
+  BigInt bestScoreAdd = BigInt.zero;
+  int bestMerges = 0;
+
+  BigInt scoreAcc = BigInt.zero;
+  int mergesAcc = 0;
+
+  for (int i = 0; i < vals.length; i++) {
+    stack.add(vals[i]);
+    // Merge while top two equal
+    while (stack.length >= 2 && stack[stack.length - 1] == stack[stack.length - 2]) {
+      final v = stack.removeLast();
+      stack.removeLast();
+      final nv = v << 1;
+      stack.add(nv);
+      scoreAcc += nv;
+      mergesAcc += 1;
+    }
+    if (i >= 1 && stack.length == 1) {
+      bestN = i + 1;
+      bestMerged = stack.single;
+      bestScoreAdd = scoreAcc;
+      bestMerges = mergesAcc;
+    }
+  }
+
+  // Need at least 1 merge (2 tiles).
+  if (bestN < 2) {
+    _clearPath();
+    setState(() {});
+    return;
+  }
+
+  // Clear used tiles
+  for (int i = 0; i < bestN; i++) {
+    final p = pos[i];
+    grid[p.r][p.c] = null;
+  }
+
+  final targetPos = pos[bestN - 1];
+  grid[targetPos.r][targetPos.c] = bestMerged;
+
+  score += bestScoreAdd;
+  _recalcBest();
+
+  _clearPath();
+  _cascadeFrom(targetPos);
+  _collapseAndFill();
+
+  _handleCombo(bestMerges);
+  _checkGoalAndMaybeAdvance();
+  _maybeShowNextLevelReward();
+  _saveGame();
+
+  setState(() {});
+}
+
+
+void _cascadeFrom(Pos start) {
+  // Chain merge (no collapse during cascade):
+  // While the tile has an equal neighbour (8-direction), merge pairwise into this tile.
+  Pos cur = start;
+  while (true) {
+    final v = grid[cur.r][cur.c];
     if (v == null) return;
 
-    if (swapMode) {
-      _handleSwapTap(p);
-      return;
-    }
-    if (hammerMode) {
-      _handleHammerTap(p);
-      return;
-    }
-
-    _dragging = true;
-    _path.clear();
-    _path.add(p);
-    _pathValue = v;
-    _segmentCount = 1;
-    setState(() {});
-  }
-
-  void _onCellEnter(Pos p) {
-    if (!_dragging) return;
-    if (!_inBounds(p)) return;
-
-    if (_path.isNotEmpty && _path.last == p) return;
-
-    // Backtrack one step if the user drags back onto the previous cell.
-    if (_path.length >= 2 && _path[_path.length - 2] == p) {
-      _path.removeLast();
-      _recomputePathTailState();
-      setState(() {});
-      return;
-    }
-
-    // If the pointer "skips" cells (fast swipe), interpolate step-by-step so
-    // long drags across rows/cols/diagonals still build a continuous chain.
-    if (_path.isNotEmpty && !_isNeighbor8(_path.last, p)) {
-      Pos cur = _path.last;
-      while (cur != p) {
-        final dr = (p.r - cur.r).clamp(-1, 1);
-        final dc = (p.c - cur.c).clamp(-1, 1);
-        final next = Pos(cur.r + dr, cur.c + dc);
-        if (next == cur) break;
-
-        // Allow backtracking during interpolation as well.
-        if (_path.length >= 2 && _path[_path.length - 2] == next) {
-          _path.removeLast();
-          _recomputePathTailState();
-          cur = _path.last;
-          continue;
+    Pos? neighborSame;
+    for (int dr = -1; dr <= 1; dr++) {
+      for (int dc = -1; dc <= 1; dc++) {
+        if (dr == 0 && dc == 0) continue;
+        final p = Pos(cur.r + dr, cur.c + dc);
+        if (!_inBounds(p)) continue;
+        if (grid[p.r][p.c] == v) {
+          neighborSame = p;
+          break;
         }
-
-        if (!_tryAppend(next)) break;
-        cur = next;
       }
-      setState(() {});
-      return;
+      if (neighborSame != null) break;
     }
+    if (neighborSame == null) return;
 
-    // Normal neighbor append.
-    if (!_tryAppend(p)) return;
-    setState(() {});
+    // Consume neighbour into current.
+    grid[neighborSame.r][neighborSame.c] = null;
+    final newV = v * BigInt.from(2);
+    grid[cur.r][cur.c] = newV;
+
+    // Score adds the produced value.
+    score += newV;
+    _recalcBest();
   }
+}
 
-  bool _tryAppend(Pos p) {
-    if (!_inBounds(p)) return false;
-    if (_path.isEmpty) return false;
-    if (_path.last == p) return false;
-    if (_path.contains(p)) return false;
+void _collapseAndFill() {
+  // Gravity collapse downwards per column, then fill empties with spawn values.
+  // Also record how many "cell steps" each tile falls so we can animate it.
+  _fallSteps.clear();
 
-    if (!_isNeighbor8(_path.last, p)) return false;
+  for (int c = 0; c < cols; c++) {
+    final tiles = <_TileFall>[];
 
-    final v = grid[p.r][p.c];
-    if (v == null) return false;
-
-    final cur = _pathValue;
-    if (cur == null) return false;
-
-    // Rule:
-    // - You can extend the current value segment with unlimited same-value tiles.
-    // - You can advance to exactly the next value (x2) only after selecting at least
-    //   2 tiles of the current value consecutively (i.e., current segment has a pair).
-    if (v == cur) {
-      _path.add(p);
-      _segmentCount += 1;
-      return true;
-    }
-
-    if (v == cur * BigInt.from(2) && _segmentCount >= 2) {
-      _path.add(p);
-      _pathValue = v;
-      _segmentCount = 1;
-      return true;
-    }
-
-    return false;
-  }
-
-  void _recomputePathTailState() {
-    if (_path.isEmpty) {
-      _pathValue = null;
-      _segmentCount = 0;
-      return;
-    }
-    final last = _path.last;
-    final lastV = grid[last.r][last.c];
-    if (lastV == null) {
-      _pathValue = null;
-      _segmentCount = 0;
-      return;
-    }
-
-    // Current segment is the run of identical values at the tail of the path.
-    _pathValue = lastV;
-    int cnt = 1;
-    for (int i = _path.length - 2; i >= 0; i--) {
-      final pv = grid[_path[i].r][_path[i].c];
-      if (pv == lastV) {
-        cnt += 1;
-      } else {
-        break;
+    // Collect existing tiles bottom-up.
+    for (int r = rows - 1; r >= 0; r--) {
+      final v = grid[r][c];
+      if (v != null) {
+        tiles.add(_TileFall(v: v, fromR: r));
       }
     }
-    _segmentCount = cnt;
+
+    // Write them back bottom-up.
+    int writeR = rows - 1;
+    for (final t in tiles) {
+      grid[writeR][c] = t.v;
+      final steps = t.fromR - writeR;
+      if (steps != 0) {
+        _fallSteps[Pos(writeR, c)] = steps.abs();
+      }
+      writeR--;
+    }
+
+    // Clear remaining.
+    for (int r = writeR; r >= 0; r--) {
+      grid[r][c] = null;
+    }
+
+    // Fill empties with new spawn values (these should "fall" from above).
+    for (int r = writeR; r >= 0; r--) {
+      final spawned = _spawnValue();
+      grid[r][c] = spawned;
+      _fallSteps[Pos(r, c)] = (r + 1); // fall from above the column
+    }
   }
 
-  void _onCellUp() {
-    if (!_dragging) return;
-    _dragging = false;
+  // Trigger spawn/fall animations.
+  _spawnTick++;
+}
 
-    if (_path.length >= 2) {
-      _applyMergeChain(_path.toList());
+
+  // Wrapper kept for compatibility with older call sites.
+  BigInt _spawnValue() => _spawnTile();
+
+  void _handleCombo(int merges) {
+    _lastCombo = merges;
+    if (merges < 5) return;
+
+    String msg;
+    if (merges >= 11) {
+      diamonds += 1;
+      msg = lang == AppLang.de
+          ? 'MEGA KOMBO! +1 💎'
+          : (lang == AppLang.tr ? 'MUHTEŞEM KOMBO! +1 💎' : 'MEGA COMBO! +1 💎');
+    } else if (merges >= 8) {
+      msg = lang == AppLang.de
+          ? 'TOLLE KOMBO!'
+          : (lang == AppLang.tr ? 'HARİKA KOMBO!' : 'AWESOME COMBO!');
     } else {
-      _clearPath();
-      setState(() {});
+      msg = lang == AppLang.de
+          ? 'SUPER KOMBO!'
+          : (lang == AppLang.tr ? 'SÜPER KOMBO!' : 'SUPER COMBO!');
     }
+    _showToast(msg);
   }
 
-  void _applyMergeChain(List<Pos> chain) {
-      if (chain.length < 2) return;
-
-      // Read values along the dragged chain (must be occupied).
-      final values = <BigInt>[];
-      for (final p in chain) {
-        final v = grid[p.r][p.c];
-        if (v == null) return;
-        values.add(v);
-      }
-
-      // Resolve merges IN ORDER using a stack.
-      // IMPORTANT CHANGE:
-      // - We no longer require the entire chain to collapse into a single tile.
-      // - Any chain that respects the selection rules will produce one or more resulting tiles.
-      //   (Example: 2-2-2 -> [2,4], 2-2-2-2-2-2 -> [4,8], etc.)
-      final stack = <BigInt>[];
-      int mergeOps = 0;
-      BigInt gained = BigInt.zero;
-
-      for (final v in values) {
-        stack.add(v);
-        while (stack.length >= 2) {
-          final a = stack[stack.length - 1];
-          final b = stack[stack.length - 2];
-          if (a != b) break;
-          stack.removeLast();
-          stack.removeLast();
-          final merged = a << 1;
-          stack.add(merged);
-          mergeOps += 1;
-          gained += merged;
-        }
-      }
-
-      if (mergeOps == 0) {
-        _showToast(t('noMerge'));
-        _clearPath();
-        setState(() {});
-        return;
-      }
-
-      // Sort results so the largest tile ends up at the end of the dragged chain.
-      stack.sort((a, b) => a.compareTo(b));
-      final k = stack.length;
-
-      // Clear all selected cells first.
-      for (final p in chain) {
-        grid[p.r][p.c] = null;
-      }
-
-      // Place the resulting tiles into the tail of the chain.
-      // Example: chain length 5, results length 2 -> write to positions 3 and 4.
-      for (int i = 0; i < k; i++) {
-        final pos = chain[chain.length - k + i];
-        grid[pos.r][pos.c] = stack[i];
-      }
-
-      // Score: add sum of merged results (not raw remaining tiles).
-      score += gained;
-
-      _recalcBest();
-
-      // Collapse the board (gravity) and then spawn into empties.
-      _collapseAndFill();
-
-      _handleCombo(mergeOps);
-      _checkGoalAndMaybeAdvance();
-      _maybeShowNextLevelReward();
-      _saveGame();
-
-      _clearPath();
-      setState(() {});
-    }
-
-  int _cascadeFrom(Pos start) {
-    // Chain merge (no collapse during cascade):
-    // While the tile has an equal neighbour (8-direction), merge pairwise into this tile.
-    int merges = 0;
-    Pos cur = start;
-    while (true) {
-      final v = grid[cur.r][cur.c];
-      // If the starting tile disappeared (shouldn't happen), stop and return merges so far.
-      if (v == null) return merges;
-      Pos? neighborSame;
-      for (int dr = -1; dr <= 1; dr++) {
-        for (int dc = -1; dc <= 1; dc++) {
-          if (dr == 0 && dc == 0) continue;
-          final p = Pos(cur.r + dr, cur.c + dc);
-          if (!_inBounds(p)) continue;
-          if (grid[p.r][p.c] == v) {
-            neighborSame = p;
-            break;
-          }
-        }
-        if (neighborSame != null) break;
-      }
-      // No more equal neighbours -> cascade ends.
-      if (neighborSame == null) break;
-
-      grid[neighborSame.r][neighborSame.c] = null;
-      final newV = v * BigInt.from(2);
-      grid[cur.r][cur.c] = newV;
-      score += newV;
-      merges += 1;
-      _recalcBest();
-    }
-
-    return merges;
+  void _maybeShowNextLevelReward() {
+    // Phase 2 rewarded flow is not wired in this DartPad-safe build.
+    // Kept as no-op so we don't break existing call sites.
   }
 
-
-  void _collapseAndFill() {
-    // Build a new grid applying gravity, while recording how many rows each tile fell.
-    final old = grid;
-    final newGrid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
-    _fallSteps.clear();
-
-    for (int c = 0; c < cols; c++) {
-      // Collect tiles from bottom to top.
-      final tiles = <({BigInt v, int fromR})>[];
-      for (int r = rows - 1; r >= 0; r--) {
-        final v = old[r][c];
-        if (v != null) tiles.add((v: v, fromR: r));
-      }
-
-      // Place them bottom-aligned in the new grid.
-      int writeR = rows - 1;
-      for (final t in tiles) {
-        newGrid[writeR][c] = t.v;
-        final steps = t.fromR - writeR;
-        if (steps != 0) {
-          _fallSteps[Pos(writeR, c)] = steps.abs();
-        }
-        writeR -= 1;
-      }
-
-      // Spawn remaining cells at the top, as if they fall from above the board.
-      for (int r = writeR; r >= 0; r--) {
-        newGrid[r][c] = _spawnTile();
-        // Larger steps = feels like it falls from outside.
-        _fallSteps[Pos(r, c)] = (writeR - r + 2);
-      }
-    }
-
-    grid = newGrid;
-    _fallTick++;
+  void _saveGame() {
+    // Persistence is disabled in DartPad. In the full app you can wire this to
+    // SharedPreferences without changing call sites.
   }
 
   void _checkGoalAndMaybeAdvance() {
-  // Level system: 2048 -> Level 1 complete, 4096 -> Level 2, 8192 -> Level 3 ...
-  // On each level transition, we enqueue a rewarded popup (Phase 2).
-  while (true) {
-    final goal = _goalForLevel(levelIdx);
-    final curMax = _maxOnBoard();
-    if (curMax >= goal) {
-      // Enqueue reward: one block of (goal / 2)
-      _pendingLevelRewards.add(goal ~/ BigInt.from(2));
-      levelIdx += 1;
-      _showToast('LEVEL UP → $levelIdx');
-      continue;
-    }
-    break;
-  }
-}
-
-  
-// ===== Phase 2: Combo + Level Reward =====
-void _handleCombo(int merges) {
-  if (merges <= 0) return;
-
-  String? label;
-  if (merges >= 11) {
-    label = t('megaCombo');
-  } else if (merges >= 8) {
-    label = t('greatCombo');
-  } else if (merges >= 5) {
-    label = t('superCombo');
-  }
-
-  if (label != null) {
-    _showToast('$label ×$merges');
-  }
-
-  if (merges >= 11) {
-    diamonds += 1;
-    _flyDiamondToBox();
-  }
-}
-
-void _flyDiamondToBox() {
-  final overlay = Overlay.maybeOf(context);
-  if (overlay == null) return;
-
-  final boardBox = _boardKey.currentContext?.findRenderObject() as RenderBox?;
-  final diamondBox = _diamondKey.currentContext?.findRenderObject() as RenderBox?;
-  if (boardBox == null || diamondBox == null) return;
-
-  final start = boardBox.localToGlobal(boardBox.size.center(Offset.zero));
-  final end = diamondBox.localToGlobal(diamondBox.size.center(Offset.zero));
-
-  late final OverlayEntry entry;
-  final controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 650));
-  final tween = Tween<Offset>(begin: start, end: end)
-      .animate(CurvedAnimation(parent: controller, curve: Curves.easeInOutCubic));
-  final scale = Tween<double>(begin: 1.3, end: 0.6)
-      .animate(CurvedAnimation(parent: controller, curve: Curves.easeInOut));
-
-  entry = OverlayEntry(
-    builder: (context) {
-      return AnimatedBuilder(
-        animation: controller,
-        builder: (context, _) {
-          final p = tween.value;
-          return Positioned(
-            left: p.dx - 14,
-            top: p.dy - 14,
-            child: Transform.scale(
-              scale: scale.value,
-              child: Icon(Icons.star, size: 28, color: Colors.amber.withOpacity(0.95)),
-            ),
-          );
-        },
-      );
-    },
-  );
-
-  overlay.insert(entry);
-  controller.forward().whenComplete(() {
-    entry.remove();
-    controller.dispose();
-    _showToast('+1 💎');
-    setState(() {});
-  });
-}
-
-void _maybeShowNextLevelReward() {
-  if (_levelRewardDialogOpen) return;
-  if (_pendingLevelRewards.isEmpty) return;
-  _levelRewardDialogOpen = true;
-  final reward = _pendingLevelRewards.removeAt(0);
-  _showLevelRewardDialog(reward).whenComplete(() {
-    _levelRewardDialogOpen = false;
-    _maybeShowNextLevelReward();
-  });
-}
-
-Future<void> _showLevelRewardDialog(BigInt rewardValue) async {
-  final accepted = await showDialog<bool>(
-    context: context,
-    barrierDismissible: true,
-    builder: (context) {
-      return AlertDialog(
-        backgroundColor: const Color(0xFF0B1546),
-        title: Text(t('rewardTitle'), style: _neon(18)),
-        content: Text(
-          '${t('rewardCta')}\n\n+${_fmtBig(rewardValue)}',
-          style: _neon(14, opacity: 0.9),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(t('noThanks')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(t('rewardCta')),
-          ),
-        ],
-      );
-    },
-  );
-
-  if (accepted == true) {
-    await _showFakeRewardedAd();
-    _grantLevelRewardBlock(rewardValue);
-    _showToast(t('rewardGranted'));
-    setState(() {});
-  }
-}
-
-Future<void> _showFakeRewardedAd() async {
-  await showDialog<void>(
-    context: context,
-    barrierDismissible: false,
-    builder: (context) {
-      return Dialog(
-        backgroundColor: const Color(0xFF0B1546),
-        insetPadding: const EdgeInsets.all(26),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(t('watchingAd'), style: _neon(16)),
-              const SizedBox(height: 16),
-              const SizedBox(height: 36, width: 36, child: CircularProgressIndicator()),
-            ],
-          ),
-        ),
-      );
-    },
-  ).timeout(const Duration(milliseconds: 1400), onTimeout: () {
-    Navigator.of(context, rootNavigator: true).maybePop();
-  });
-}
-
-void _grantLevelRewardBlock(BigInt rewardValue) {
-  Pos? minPos;
-  BigInt? minVal;
-  for (int r = 0; r < rows; r++) {
-    for (int c = 0; c < cols; c++) {
-      final v = grid[r][c];
-      if (v == null) continue;
-      if (minVal == null || v < minVal) {
-        minVal = v;
-        minPos = Pos(r, c);
+    // Phase 1: level increases when reaching targets (2048, 4096, 8192 ...).
+    // No automatic diamond reward here (rewarded flow will be Phase 2).
+    while (true) {
+      final goal = _goalForLevel(levelIdx);
+      final curMax = _maxOnBoard();
+      if (curMax >= goal) {
+        levelIdx += 1;
+        _showToast('LEVEL UP → $levelIdx');
+        continue;
       }
+      break;
     }
   }
-  if (minPos == null) {
-    grid[rows - 1][cols ~/ 2] = rewardValue;
-    return;
-  }
-  grid[minPos.r][minPos.c] = rewardValue;
-}
 
-// ===== Tools =====
+  // ===== Tools =====
 
   void _handleSwapTap(Pos p) {
     final v = grid[p.r][p.c];
@@ -939,59 +733,45 @@ void _grantLevelRewardBlock(BigInt rewardValue) {
   }
 
   String _fmtBig(BigInt n) {
-    // Plain numeric rendering (no suffix letters like "2a").
-    final s = n.toString();
-    // Add thousands separators for readability.
-    final buf = StringBuffer();
-    for (int i = 0; i < s.length; i++) {
-      final posFromEnd = s.length - i;
-      buf.write(s[i]);
-      if (posFromEnd > 1 && posFromEnd % 3 == 1) {
-        buf.write(',');
-      }
-    }
-    return buf.toString();
+  // UI should display only numbers (no extra letters like "2a").
+  // We format large values with short suffixes: K, M, B, T.
+  final num v = n.toDouble();
+  if (v < 1000) return n.toString();
+  const suffixes = ['K', 'M', 'B', 'T', 'Q'];
+  double x = v.toDouble();
+  int i = 0;
+  while (x >= 1000 && i < suffixes.length - 1) {
+    x /= 1000.0;
+    i++;
   }
-
-  Color _shade(Color c, double lightnessDelta) {
-    final hsl = HSLColor.fromColor(c);
-    final l = (hsl.lightness + lightnessDelta).clamp(0.0, 1.0);
-    return hsl.withLightness(l).toColor();
-  }
+  final str = x >= 10 ? x.toStringAsFixed(0) : x.toStringAsFixed(1);
+  return str + suffixes[i - 1];
+}
 
   Color _tileColor(BigInt v) {
     final int p = (v.bitLength - 1).clamp(0, 30);
-        final hues = <Color>[
-      // Muted, distinct palette (less eye-strain than neon).
-      const Color(0xFF5568B3), // muted indigo
-      const Color(0xFF4B8BBE), // muted blue
-      const Color(0xFF2F8F83), // muted teal
-      const Color(0xFF5A8F4E), // muted green
-      const Color(0xFF9B8B3C), // muted olive
-      const Color(0xFFB07A3F), // muted amber
-      const Color(0xFFA85A4A), // muted terracotta
-      const Color(0xFF9A4E7C), // muted magenta
-      const Color(0xFF6E5A8F), // muted purple
-      const Color(0xFF4F6A72), // muted slate
+    final hues = <Color>[
+      const Color(0xFF264653), // deep teal
+      const Color(0xFF2A4D69), // muted blue
+      const Color(0xFF4B3F72), // muted purple
+      const Color(0xFF556B2F), // olive
+      const Color(0xFF8D7B68), // warm taupe
+      const Color(0xFF7A4E3A), // terracotta
+      const Color(0xFF5B6770), // slate
+      const Color(0xFF3D5A80), // steel blue
     ];
     return hues[p % hues.length];
   }
 
-  
-  String _scoreLabel() {
-    // Score is accumulated as raw merge-sum. Display rule:
-    // - Until reaching 1 point (1000), show raw value.
-    // - From 1000+, show points = raw/1000 with 1 decimal.
-    final raw = score;
-    if (raw < BigInt.from(1000)) return raw.toString();
-    final ten = (raw * BigInt.from(10)) ~/ BigInt.from(1000); // points * 10
-    final intPart = ten ~/ BigInt.from(10);
-    final frac = (ten % BigInt.from(10)).toInt();
-    if (frac == 0) return intPart.toString();
-    return '${intPart.toString()}.$frac';
+
+  Color _chainColorForIndex(int idx) {
+    // Muted neon-ish colors for the chain line; changes per added block.
+    final double hue = (200 + (idx * 37)) % 360;
+    final hsv = HSVColor.fromAHSV(0.70, hue, 0.55, 0.95);
+    return hsv.toColor();
   }
 
-TextStyle _neon(double size, {double opacity = 0.92, bool bold = true}) {
+  TextStyle _neon(double size, {double opacity = 0.92, bool bold = true}) {
     return TextStyle(
       color: Colors.white.withOpacity(opacity),
       fontSize: size,
@@ -1022,7 +802,7 @@ TextStyle _neon(double size, {double opacity = 0.92, bool bold = true}) {
               children: [
                 _buildHeader(nowLabel: nowLabel, maxLabel: maxLabel, goalLabel: goalLabel, ratio: ratio),
                 const SizedBox(height: 10),
-                Expanded(child: _buildBoard(key: _boardKey)),
+                Expanded(child: _buildBoard()),
                 const SizedBox(height: 6),
               ],
             ),
@@ -1099,9 +879,7 @@ TextStyle _neon(double size, {double opacity = 0.92, bool bold = true}) {
         children: [
           Row(
             children: [
-              KeyedSubtree(
-                key: _diamondKey,
-                child: _pill(
+              _pill(
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1112,10 +890,9 @@ TextStyle _neon(double size, {double opacity = 0.92, bool bold = true}) {
                     _tinyButton(icon: Icons.add, onTap: _openShopSheet),
                   ],
                 ),
-              )
               ),
               const Spacer(),
-              Text(_scoreLabel(), style: _neon(34, opacity: 0.98)),
+              Text(_fmtBig(score), style: _neon(34, opacity: 0.98)),
               const Spacer(),
               _pill(
                 child: Row(
@@ -1203,55 +980,34 @@ TextStyle _neon(double size, {double opacity = 0.92, bool bold = true}) {
     );
   }
 
-  Widget _buildBoard({Key? key}) {
+  Widget _buildBoard() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final boardW = min(constraints.maxWidth, 430.0);
-        const gap = 10.0;
+        final boardW = min(constraints.maxWidth, 430.0) * 0.96;
+        final gap = kGap;
         final cellSize = (boardW - (cols - 1) * gap) / cols;
         final boardH = rows * cellSize + (rows - 1) * gap;
 
-        Pos? posFromLocal(Offset local) {
-          final x = local.dx;
-          final y = local.dy;
-          if (x < 0 || y < 0 || x > boardW || y > boardH) return null;
-          final step = cellSize + gap;
-          final c = (x / step).floor();
-          final r = (y / step).floor();
-          if (r < 0 || r >= rows || c < 0 || c >= cols) return null;
-
-          // Ignore touches inside the gap area between cells.
-          final dxIn = x - c * step;
-          final dyIn = y - r * step;
-          if (dxIn > cellSize || dyIn > cellSize) return null;
-
-          return Pos(r, c);
-        }
-
-        void handleDown(Offset local) {
-          final p = posFromLocal(local);
-          if (p == null) return;
-          _onCellDown(p);
-        }
-
-        void handleMove(Offset local) {
-          final p = posFromLocal(local);
-          if (p == null) return;
-          _onCellEnter(p);
-        }
-
         return Center(
           child: SizedBox(
-            key: key,
             width: boardW,
             height: boardH,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onPanStart: (d) => handleDown(d.localPosition),
-              onPanUpdate: (d) => handleMove(d.localPosition),
+              onPanStart: (d) {
+                final p = _hitTestPos(d.localPosition, cellSize, gap);
+                if (p != null) _onCellDown(p);
+              },
+              onPanUpdate: (d) {
+                final p = _hitTestPos(d.localPosition, cellSize, gap);
+                if (p != null) _onCellEnter(p);
+              },
               onPanEnd: (_) => _onCellUp(),
               onPanCancel: _onCellUp,
-              onTapDown: (d) => handleDown(d.localPosition),
+              onTapDown: (d) {
+                final p = _hitTestPos(d.localPosition, cellSize, gap);
+                if (p != null) _onCellDown(p);
+              },
               onTapUp: (_) => _onCellUp(),
               child: Stack(
                 children: [
@@ -1262,17 +1018,44 @@ TextStyle _neon(double size, {double opacity = 0.92, bool bold = true}) {
                         top: r * (cellSize + gap),
                         width: cellSize,
                         height: cellSize,
-                        child: _cellWidget(Pos(r, c), cellSize, gap),
+                        child: _cellWidget(Pos(r, c), cellSize),
                       ),
-                  if (_path.length >= 2)
+                  
+                  // Vanish FX for consumed tiles
+                  for (final fx in _vanishFx)
+                    Positioned(
+                      left: fx.pos.c * (cellSize + gap),
+                      top: fx.pos.r * (cellSize + gap),
+                      width: cellSize,
+                      height: cellSize,
+                      child: IgnorePointer(
+                        child: TweenAnimationBuilder<double>(
+                          key: ValueKey('van_${fx.pos.r}_${fx.pos.c}_${fx.tick}'),
+                          tween: Tween<double>(begin: 1.0, end: 0.0),
+                          duration: const Duration(milliseconds: 280),
+                          curve: Curves.easeIn,
+                          builder: (context, t, _) {
+                            return Opacity(
+                              opacity: t.clamp(0.0, 1.0),
+                              child: Transform.scale(
+                                scale: 0.85 + 0.15 * t,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: _tileColor(fx.value).withOpacity(0.35),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+if (_path.length >= 2)
                     Positioned.fill(
                       child: IgnorePointer(
                         child: CustomPaint(
-                          painter: _NeonPathPainter(
-                            points: _path,
-                            cellSize: cellSize,
-                            gap: gap,
-                          ),
+                          painter: _NeonPathPainter(points: _path.toList(), colors: _pathColors.toList(), cellSize: cellSize, gap: gap),
                         ),
                       ),
                     ),
@@ -1285,107 +1068,77 @@ TextStyle _neon(double size, {double opacity = 0.92, bool bold = true}) {
     );
   }
 
-Widget _cellWidget(Pos p, double size, double gap) {
-    final v = grid[p.r][p.c];
-    final selected = _path.contains(p);
-    final isSwapFirst = (swapMode && _swapFirst == p);
-    final fall = _fallSteps[p] ?? 0;
+  Widget _cellWidget(Pos p, double size) {
+  final v = grid[p.r][p.c];
+  final selected = _path.contains(p);
+  final isSwapFirst = (swapMode && _swapFirst == p);
 
-    final tile = AnimatedContainer(
-      duration: const Duration(milliseconds: 120),
-      curve: Curves.easeOut,
-      decoration: BoxDecoration(
-        // 3D-ish look: subtle gradient + inner highlight, muted colors
-        gradient: v == null
-            ? null
-            : LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  _tileColor(v).withOpacity(0.92),
-                  _tileColor(v).withOpacity(0.78),
-                ],
-              ),
-        color: v == null ? Colors.white.withOpacity(0.05) : null,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: (selected || isSwapFirst) ? Colors.white.withOpacity(0.90) : Colors.white.withOpacity(0.12),
-          width: (selected || isSwapFirst) ? 2 : 1,
-        ),
-        boxShadow: [
-          // Outer shadow
-          BoxShadow(
-            color: Colors.black.withOpacity(selected ? 0.50 : 0.32),
-            blurRadius: selected ? 18 : 14,
-            offset: const Offset(0, 10),
-          ),
-          // Soft highlight (fake inner bevel)
-          if (v != null)
-            BoxShadow(
-              color: Colors.white.withOpacity(0.10),
-              blurRadius: 0,
-              spreadRadius: 0,
-              offset: const Offset(-2, -2),
-            ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          if (v != null)
-            Positioned(
-              left: 10,
-              top: 10,
-              right: 10,
-              child: Container(
-                height: 10,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(999),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Colors.white.withOpacity(0.18),
-                      Colors.white.withOpacity(0.02),
-                    ],
-                  ),
+  final steps = _fallSteps[p] ?? 0;
+  final beginDy = steps <= 0 ? 0.0 : -(steps * (size + kGap));
+
+  final baseColor = v == null ? Colors.white.withOpacity(0.05) : _tileColor(v).withOpacity(0.92);
+  final top = _lighten(baseColor, 0.08);
+  final bottom = _darken(baseColor, 0.16);
+
+  return Listener(
+    onPointerDown: (_) => _onCellDown(p),
+    onPointerMove: (_) => _onCellEnter(p),
+    onPointerUp: (_) => _onCellUp(),
+    child: TweenAnimationBuilder<double>(
+      key: ValueKey('fall_${p.r}_${p.c}_${v?.toString() ?? "n"}_${_spawnTick}'),
+      tween: Tween<double>(begin: beginDy, end: 0.0),
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      builder: (context, dy, child) {
+        return Transform.translate(offset: Offset(0, dy), child: child);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          gradient: v == null
+              ? null
+              : LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [top, baseColor, bottom],
                 ),
-              ),
-            ),
-          Center(
-            child: v == null
-                ? const SizedBox.shrink()
-                : Text(
-                    v.toString(), // ONLY number, no suffix
-                    style: _neon(size * 0.26, opacity: 0.96),
-                  ),
+          color: v == null ? Colors.white.withOpacity(0.05) : null,
+          borderRadius: BorderRadius.circular(12), // more square-ish
+          border: Border.all(
+            color: (selected || isSwapFirst) ? Colors.white.withOpacity(0.90) : Colors.white.withOpacity(0.10),
+            width: (selected || isSwapFirst) ? 2 : 1,
           ),
-        ],
+          boxShadow: [
+            // subtle 3D depth
+            BoxShadow(
+              color: Colors.black.withOpacity(selected ? 0.50 : 0.32),
+              blurRadius: selected ? 18 : 12,
+              offset: const Offset(0, 8),
+            ),
+            if (v != null)
+              BoxShadow(
+                color: Colors.white.withOpacity(0.10),
+                blurRadius: 8,
+                offset: const Offset(-2, -2),
+              ),
+          ],
+        ),
+        child: Center(
+          child: v == null
+              ? const SizedBox.shrink()
+              : Text(
+                  _fmtBig(v),
+                  style: _neon(size * 0.26, opacity: 0.96),
+                ),
+        ),
       ),
-    );
+    ),
+  );
+}
 
-    Widget animated = tile;
 
-    // Gravity fall: new/moved tiles "drop" into place from above with a soft bounce.
-    if (fall > 0) {
-      final dy = -(fall.toDouble() * (size + gap));
-      animated = TweenAnimationBuilder<double>(
-        key: ValueKey('fall_${p.r}_${p.c}_${v?.toString() ?? "null"}_$_fallTick'),
-        tween: Tween<double>(begin: dy, end: 0),
-        duration: Duration(milliseconds: min(520, 220 + fall * 60)),
-        curve: Curves.easeOutBack,
-        builder: (context, y, child) => Transform.translate(offset: Offset(0, y), child: child),
-        child: tile,
-      );
-    }
-
-    return Listener(
-      onPointerDown: (_) => _onCellDown(p),
-      onPointerMove: (_) => _onCellEnter(p),
-      onPointerUp: (_) => _onCellUp(),
-      child: animated,
-    );
-  }
-Widget _buildBottomBar() {
+  Widget _buildBottomBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
       decoration: BoxDecoration(
@@ -1520,7 +1273,6 @@ Widget _buildBottomBar() {
                       setState(() => diamonds += gems);
                       Navigator.pop(ctx);
                       _showToast('+$gems 💎');
-                      _saveGame();
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -1541,7 +1293,7 @@ Widget _buildBottomBar() {
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
                               color: Colors.white.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(6),
                               border: Border.all(color: Colors.white.withOpacity(0.14)),
                             ),
                             child: Text(t('buy'), style: _neon(12, opacity: 0.9)),
@@ -1582,14 +1334,12 @@ Widget _buildBottomBar() {
                 title: 'Language',
                 child: SegmentedButton<AppLang>(
                   segments: const [
+                    ButtonSegment(value: AppLang.tr, label: Text('TR')),
                     ButtonSegment(value: AppLang.en, label: Text('EN')),
                     ButtonSegment(value: AppLang.de, label: Text('DE')),
                   ],
                   selected: {lang},
-                  onSelectionChanged: (s) {
-                    setState(() => lang = s.first);
-                    _saveGame();
-                  },
+                  onSelectionChanged: (s) => setState(() => lang = s.first),
                 ),
               ),
               const SizedBox(height: 10),
@@ -1599,7 +1349,6 @@ Widget _buildBottomBar() {
                   onPressed: () {
                     Navigator.pop(ctx);
                     _resetBoard(hard: true);
-                    _clearSavedGame();
                   },
                   child: const Text('Hard reset'),
                 ),
@@ -1645,7 +1394,6 @@ Widget _buildBottomBar() {
             onPressed: () {
               Navigator.pop(ctx);
               _resetBoard(hard: true);
-                    _clearSavedGame();
             },
             child: Text(t('restart')),
           ),
@@ -1653,6 +1401,18 @@ Widget _buildBottomBar() {
       ),
     );
   }
+}
+
+Color _lighten(Color c, double amount) {
+  final hsl = HSLColor.fromColor(c);
+  final l = (hsl.lightness + amount).clamp(0.0, 1.0) as double;
+  return hsl.withLightness(l).toColor();
+}
+
+Color _darken(Color c, double amount) {
+  final hsl = HSLColor.fromColor(c);
+  final l = (hsl.lightness - amount).clamp(0.0, 1.0) as double;
+  return hsl.withLightness(l).toColor();
 }
 
 @immutable
@@ -1670,46 +1430,68 @@ class Pos {
 
 class _NeonPathPainter extends CustomPainter {
   final List<Pos> points;
+  final List<Color> colors;
   final double cellSize;
   final double gap;
 
-  _NeonPathPainter({required this.points, required this.cellSize, required this.gap});
+  const _NeonPathPainter({
+    required this.points,
+    required this.colors,
+    required this.cellSize,
+    required this.gap,
+  });
+
+  Offset _center(Pos p) {
+    final x = p.c * (cellSize + gap) + cellSize / 2;
+    final y = p.r * (cellSize + gap) + cellSize / 2;
+    return Offset(x, y);
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
     if (points.length < 2) return;
 
-    // Simple neon-like stroke (fast, no heavy shaders).
-    final glow = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 12
-      ..strokeCap = StrokeCap.round
-      ..color = Colors.white.withOpacity(0.18);
+    for (int i = 0; i < points.length - 1; i++) {
+      final c = (i < colors.length ? colors[i] : Colors.white.withOpacity(0.65));
 
-    final core = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 6
-      ..strokeCap = StrokeCap.round
-      ..color = Colors.white.withOpacity(0.70);
+      final glow = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 12
+        ..strokeCap = StrokeCap.round
+        ..color = c.withOpacity(0.22);
 
-    Offset center(Pos p) {
-      final x = p.c * (cellSize + gap) + cellSize / 2;
-      final y = p.r * (cellSize + gap) + cellSize / 2;
-      return Offset(x, y);
+      final core = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 6
+        ..strokeCap = StrokeCap.round
+        ..color = c.withOpacity(0.80);
+
+      final a = _center(points[i]);
+      final b = _center(points[i + 1]);
+      canvas.drawLine(a, b, glow);
+      canvas.drawLine(a, b, core);
     }
-
-    final p0 = center(points.first);
-    final pathObj = Path()..moveTo(p0.dx, p0.dy);
-    for (int i = 1; i < points.length; i++) {
-      final pi = center(points[i]);
-      pathObj.lineTo(pi.dx, pi.dy);
-    }
-    canvas.drawPath(pathObj, glow);
-    canvas.drawPath(pathObj, core);
   }
 
   @override
   bool shouldRepaint(covariant _NeonPathPainter oldDelegate) {
-    return oldDelegate.points != points || oldDelegate.cellSize != cellSize || oldDelegate.gap != gap;
+    return oldDelegate.points != points ||
+        oldDelegate.colors != colors ||
+        oldDelegate.cellSize != cellSize ||
+        oldDelegate.gap != gap;
   }
+}
+
+
+class _TileFall {
+  final BigInt v;
+  final int fromR;
+  const _TileFall({required this.v, required this.fromR});
+}
+
+class _VanishFx {
+  final Pos pos;
+  final BigInt value;
+  final int tick;
+  const _VanishFx({required this.pos, required this.value, required this.tick});
 }
