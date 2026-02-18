@@ -36,7 +36,7 @@ class UltraGamePage extends StatefulWidget {
 class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateMixin {
   // ===== Board config =====
   static const int cols = 5;
-  static const int rows = 8;
+  static const int rows = 7;
   static const double kGap = 10.0;
   static const double kBannerHeight = 60.0; // fixed banner height (Phase 1)
 
@@ -48,6 +48,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   BigInt score = BigInt.zero;
   BigInt best = BigInt.zero;
   int diamonds = 0; // starts with 0 diamonds
+  int swaps = 0; // rewarded swap credits
 
   bool swapMode = false;
   bool hammerMode = false;
@@ -87,6 +88,9 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'swap': 'SWAP',
     'hammer': 'HAMMER',
     'watchAd': 'AD',
+  'swapBonus': 'SWAP Bonus',
+  'swapPlus': '+1 SWAP',
+  'noSwaps': 'No swaps left',
     'shop': 'SHOP',
     'pause': 'PAUSE',
     'settings': 'Settings',
@@ -105,6 +109,9 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'swap': 'TAUSCH',
     'hammer': 'HAMMER',
     'watchAd': 'WERBUNG',
+  'swapBonus': 'SWAP Bonus',
+  'swapPlus': '+1 SWAP',
+  'noSwaps': 'Keine Swaps übrig',
     'shop': 'SHOP',
     'pause': 'PAUSE',
     'settings': 'Einstellungen',
@@ -123,6 +130,9 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'swap': 'TAKAS',
     'hammer': 'TOKMAK',
     'watchAd': 'REKLAM',
+  'swapBonus': 'Swap Bonusu',
+  'swapPlus': '+1 SWAP',
+  'noSwaps': 'Swap hakkın yok',
     'shop': 'MAĞAZA',
     'pause': 'DURAKLAT',
     'settings': 'Ayarlar',
@@ -165,41 +175,42 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
       score = BigInt.zero;
       levelIdx = 1;
       diamonds = 0;
+      swaps = 0;
     }
     _recalcBest();
     setState(() {});
   }
 
   void _initFirstBoard() {
-    // Board on first open must contain 2,4,8,16,32,64 blocks.
-    // We keep the board full (current game style) but guarantee at least one of each.
-    final required = <BigInt>[
-      BigInt.from(2),
-      BigInt.from(4),
-      BigInt.from(8),
-      BigInt.from(16),
-      BigInt.from(32),
-      BigInt.from(64),
-    ];
-
-    final allPositions = <Pos>[];
+    // Initial board distribution (only for first open):
+    // values {2,4,8,16,32} with balanced weights (base 4).
+    final all = <Pos>[];
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < cols; c++) {
-        allPositions.add(Pos(r, c));
+        all.add(Pos(r, c));
       }
     }
-    allPositions.shuffle(_rng);
+    all.shuffle(_rng);
 
-    // Place required values first.
-    for (int i = 0; i < required.length && i < allPositions.length; i++) {
-      final p = allPositions[i];
-      grid[p.r][p.c] = required[i];
+    BigInt pick() {
+      final roll = _rng.nextDouble();
+      if (roll < 0.10) return BigInt.from(2);
+      if (roll < 0.50) return BigInt.from(4);
+      if (roll < 0.75) return BigInt.from(8);
+      if (roll < 0.90) return BigInt.from(16);
+      return BigInt.from(32);
     }
 
-    // Fill the rest using the smart spawn pool (Phase 1).
-    for (int i = required.length; i < allPositions.length; i++) {
-      final p = allPositions[i];
-      grid[p.r][p.c] = _spawnTile();
+    // Fill all cells
+    for (final p in all) {
+      grid[p.r][p.c] = pick();
+    }
+
+    // Ensure at least one of each (2,4,8,16,32)
+    const ensure = [2, 4, 8, 16, 32];
+    for (int i = 0; i < ensure.length && i < all.length; i++) {
+      final p = all[i];
+      grid[p.r][p.c] = BigInt.from(ensure[i]);
     }
   }
 
@@ -287,18 +298,21 @@ void _clearPath() {
 BigInt? _valueAt(Pos p) => _inBounds(p) ? grid[p.r][p.c] : null;
 
 Color _chainColorForStep(int step) {
+  // Vibrant but not harsh (higher contrast) palette for chain segments.
   const palette = <Color>[
-    Color(0xFF7AA7FF),
-    Color(0xFF7FE3C3),
-    Color(0xFFFFC58A),
-    Color(0xFFD7A8FF),
-    Color(0xFFFF9FB3),
-    Color(0xFFA9E2FF),
-    Color(0xFFCBEA8D),
-    Color(0xFFF2E38B),
+    Color(0xFF2EE6D6), // aqua neon
+    Color(0xFF7C5CFF), // violet
+    Color(0xFFFFC857), // amber
+    Color(0xFF2F9BFF), // blue
+    Color(0xFFFF5FA2), // pink
+    Color(0xFF7DFF6B), // green
+    Color(0xFFFF6B4A), // coral
+    Color(0xFFB8FF3D), // lime
   ];
   return palette[step % palette.length].withOpacity(0.78);
 }
+
+Color _chainColorForIndex(int idx) => _chainColorForStep(idx);
 
 void _onCellDown(Pos p) {
   if (!_inBounds(p)) return;
@@ -332,9 +346,48 @@ void _onCellDown(Pos p) {
   setState(() {});
 }
 
+void _recalcPathState() {
+  if (_path.isEmpty) {
+    _armed = false;
+    _baseValue = null;
+    _baseCount = 0;
+    _stageValue = null;
+    _stageCount = 0;
+    _lastValue = null;
+    return;
+  }
+  _baseValue = _valueAt(_path.first);
+  _baseCount = 0;
+  for (final p in _path) {
+    if (_valueAt(p) == _baseValue) {
+      _baseCount++;
+    } else {
+      break;
+    }
+  }
+  _armed = _baseCount >= 2;
+
+  // Determine current stage and last value.
+  _lastValue = _armed ? _valueAt(_path.last) : _baseValue;
+
+  // Stage is the last value in the chain (after arming).
+  _stageValue = _armed ? _valueAt(_path.last) : null;
+  _stageCount = _armed ? 1 : 0;
+}
+
 void _onCellEnter(Pos p) {
   if (_path.isEmpty) return;
   if (!_inBounds(p)) return;
+
+  // Undo path: allow going back one step by hovering the previous cell.
+  if (_path.length >= 2 && p == _path[_path.length - 2]) {
+    _path.removeLast();
+    if (_pathColors.isNotEmpty) _pathColors.removeLast();
+    _recalcPathState();
+    setState(() {});
+    return;
+  }
+
   if (_path.contains(p)) return;
 
   final last = _path.last;
@@ -665,6 +718,7 @@ void _collapseAndFill() {
     grid[a.r][a.c] = grid[p.r][p.c];
     grid[p.r][p.c] = tmp;
 
+    if (swaps > 0) swaps -= 1;
     swapMode = false;
     _swapFirst = null;
     _showToast(t('swap'));
@@ -682,15 +736,14 @@ void _collapseAndFill() {
 
   void _toggleSwap() {
     if (!swapMode) {
-      if (diamonds < 10) {
-        _showToast(t('notEnoughDiamonds'));
+      if (swaps <= 0) {
+        _showToast(t('noSwaps'));
         return;
       }
-      diamonds -= 10;
       swapMode = true;
       hammerMode = false;
       _swapFirst = null;
-      _showToast('-10 💎');
+      _showToast('${t('swap')} (1)');
     } else {
       swapMode = false;
       _swapFirst = null;
@@ -716,8 +769,8 @@ void _collapseAndFill() {
   }
 
   void _watchAdReward() {
-    diamonds += 10;
-    _showToast('+10 💎');
+    swaps += 1;
+    _showToast(t('swapPlus'));
     setState(() {});
   }
 
@@ -751,24 +804,26 @@ void _collapseAndFill() {
   Color _tileColor(BigInt v) {
     final int p = (v.bitLength - 1).clamp(0, 30);
     final hues = <Color>[
-      const Color(0xFF264653), // deep teal
-      const Color(0xFF2A4D69), // muted blue
-      const Color(0xFF4B3F72), // muted purple
-      const Color(0xFF556B2F), // olive
-      const Color(0xFF8D7B68), // warm taupe
-      const Color(0xFF7A4E3A), // terracotta
-      const Color(0xFF5B6770), // slate
-      const Color(0xFF3D5A80), // steel blue
+      const Color(0xFF1B2A41), // deep navy
+      const Color(0xFF2E4A7D), // blue
+      const Color(0xFF5B2C83), // purple
+      const Color(0xFF007C8A), // teal
+      const Color(0xFFB84A6D), // magenta rose
+      const Color(0xFFB9851C), // amber
+      const Color(0xFF2D8A4A), // green
+      const Color(0xFF1F6FB2), // bright blue
+      const Color(0xFF8A3FFC), // neon violet
+      const Color(0xFF00A3FF), // cyan
+      const Color(0xFFFF4D8D), // neon pink
+      const Color(0xFFFFB703), // neon amber
+      const Color(0xFF00D68F), // neon green
+      const Color(0xFFEF476F), // coral
+      const Color(0xFF06D6A0), // mint
+      const Color(0xFF118AB2), // ocean
+      const Color(0xFF9B5DE5), // lavender neon
+      const Color(0xFFF15BB5), // pink
     ];
     return hues[p % hues.length];
-  }
-
-
-  Color _chainColorForIndex(int idx) {
-    // Muted neon-ish colors for the chain line; changes per added block.
-    final double hue = (200 + (idx * 37)) % 360;
-    final hsv = HSVColor.fromAHSV(0.70, hue, 0.55, 0.95);
-    return hsv.toColor();
   }
 
   TextStyle _neon(double size, {double opacity = 0.92, bool bold = true}) {
@@ -985,7 +1040,8 @@ void _collapseAndFill() {
       builder: (context, constraints) {
         final boardW = min(constraints.maxWidth, 430.0) * 0.96;
         final gap = kGap;
-        final cellSize = (boardW - (cols - 1) * gap) / cols;
+        final cellSizeBase = (boardW - (cols - 1) * gap) / cols;
+        final cellSize = cellSizeBase * 0.87;
         final boardH = rows * cellSize + (rows - 1) * gap;
 
         return Center(
@@ -1042,7 +1098,7 @@ void _collapseAndFill() {
                                 child: Container(
                                   decoration: BoxDecoration(
                                     color: _tileColor(fx.value).withOpacity(0.35),
-                                    borderRadius: BorderRadius.circular(12),
+                                    borderRadius: BorderRadius.circular(8),
                                   ),
                                 ),
                               ),
@@ -1151,7 +1207,7 @@ if (_path.length >= 2)
             child: _actionButton(
               icon: swapMode ? Icons.close : Icons.swap_horiz,
               label: t('swap'),
-              sub: '10 💎',
+              sub: '$swaps',
               active: swapMode,
               onTap: _toggleSwap,
             ),
@@ -1170,8 +1226,8 @@ if (_path.length >= 2)
           Expanded(
             child: _actionButton(
               icon: Icons.smart_display,
-              label: t('watchAd'),
-              sub: '+10 💎',
+              label: t('swapBonus'),
+              sub: '+1',
               active: false,
               onTap: _watchAdReward,
             ),
