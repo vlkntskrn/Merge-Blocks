@@ -61,6 +61,8 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   // Tick used to force rebuild keys for spawn animations.
   int _spawnTick = 0;
 
+  int _fxTick = 0;
+
 
   BigInt? _lastValue; // last value in current selection
   final Map<Pos, int> _fallSteps = <Pos, int>{};
@@ -193,12 +195,9 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     all.shuffle(_rng);
 
     BigInt pick() {
-      final roll = _rng.nextDouble();
-      if (roll < 0.10) return BigInt.from(2);
-      if (roll < 0.50) return BigInt.from(4);
-      if (roll < 0.75) return BigInt.from(8);
-      if (roll < 0.90) return BigInt.from(16);
-      return BigInt.from(32);
+      // Equal distribution for {2,4,8,16,32}
+      const values = [2, 4, 8, 16, 32];
+      return BigInt.from(values[_rng.nextInt(values.length)]);
     }
 
     // Fill all cells
@@ -215,35 +214,9 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
   BigInt _spawnTile() {
-    // Smart spawn rules:
-    // - Until 2048 is reached: max spawn = 64
-    // - When 2048 is reached: remove 2, max spawn = 128
-    // - When 4096 is reached: remove 4, min becomes 8, max spawn = 256
-    // - Continues similarly: each milestone removes the smallest spawn and increases max.
-    final m = _maxOnBoard();
-    final int maxPowReached = m <= BigInt.zero ? 1 : (m.bitLength - 1);
-
-    int minPow = 1; // 2
-    if (maxPowReached >= 11) {
-      // Reached at least 2048 (2^11)
-      minPow = max(2, maxPowReached - 9); // 2048->4, 4096->8, 8192->16 ...
-    }
-    final int maxPow = minPow + 5; // keep pool width stable
-
-    // Weighted selection favouring smaller values.
-    final roll = _rng.nextDouble();
-    int pow;
-    if (roll < 0.70) {
-      pow = minPow;
-    } else if (roll < 0.92) {
-      pow = minPow + 1;
-    } else if (roll < 0.985) {
-      pow = minPow + 2;
-    } else {
-      pow = minPow + 3;
-    }
-    pow = pow.clamp(minPow, maxPow);
-    return BigInt.one << pow;
+    // Spawn distribution: equal chance for {2,4,8,16,32} (requested).
+    const values = [2, 4, 8, 16, 32];
+    return BigInt.from(values[_rng.nextInt(values.length)]);
   }
 
   BigInt _goalForLevel(int level) {
@@ -538,6 +511,10 @@ void _applyMergeChain(List<Pos> chain) {
   // - All previous selected tiles are cleared.
   for (int i = 0; i < pos.length - 1; i++) {
     final p = pos[i];
+    final old = grid[p.r][p.c];
+    if (old != null) {
+      _pushVanishFx(p, old);
+    }
     grid[p.r][p.c] = null;
   }
   final targetPos = pos.last;
@@ -779,6 +756,17 @@ void _collapseAndFill() {
     });
   }
 
+  void _pushVanishFx(Pos p, BigInt value) {
+    final tick = _fxTick++;
+    _vanishFx.add(_VanishFx(pos: p, value: value, tick: tick));
+    // Auto-remove after the animation finishes.
+    Timer(const Duration(milliseconds: 320), () {
+      if (!mounted) return;
+      _vanishFx.removeWhere((e) => e.tick == tick);
+      setState(() {});
+    });
+  }
+
   String _fmtBig(BigInt n) {
   // UI should display only numbers (no extra letters like "2a").
   // We format large values with short suffixes: K, M, B, T.
@@ -844,7 +832,7 @@ void _collapseAndFill() {
     return Scaffold(
       backgroundColor: const Color(0xFF071033),
       body: SafeArea(
-        bottom: false,
+        bottom: true,
         child: Stack(
           children: [
             Column(
@@ -1032,10 +1020,17 @@ void _collapseAndFill() {
   Widget _buildBoard() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final boardW = min(constraints.maxWidth, 430.0) * 0.96;
         final gap = kGap;
-        final cellSizeBase = (boardW - (cols - 1) * gap) / cols;
-        final cellSize = cellSizeBase * 0.87;
+
+        // Fit board to BOTH width and height so it never overlaps the bottom bar/banner.
+        final maxW = min(constraints.maxWidth, 430.0) * 0.98;
+        final maxH = constraints.maxHeight;
+
+        final cellByW = (maxW - (cols - 1) * gap) / cols;
+        final cellByH = (maxH - (rows - 1) * gap) / rows;
+        final cellSize = min(cellByW, cellByH);
+
+        final boardW = cols * cellSize + (cols - 1) * gap;
         final boardH = rows * cellSize + (rows - 1) * gap;
 
         return Center(
@@ -1070,6 +1065,7 @@ void _collapseAndFill() {
                         height: cellSize,
                         child: _cellWidget(Pos(r, c), cellSize),
                       ),
+
                   // Vanish FX for consumed tiles
                   for (final fx in _vanishFx)
                     Positioned(
@@ -1080,18 +1076,35 @@ void _collapseAndFill() {
                       child: IgnorePointer(
                         child: TweenAnimationBuilder<double>(
                           key: ValueKey('van_${fx.pos.r}_${fx.pos.c}_${fx.tick}'),
-                          tween: Tween<double>(begin: 1.0, end: 0.0),
-                          duration: const Duration(milliseconds: 280),
-                          curve: Curves.easeIn,
+                          tween: Tween<double>(begin: 0.0, end: 1.0),
+                          duration: const Duration(milliseconds: 360),
+                          curve: Curves.easeOutCubic,
                           builder: (context, t, _) {
+                            final inv = 1.0 - t;
                             return Opacity(
-                              opacity: t.clamp(0.0, 1.0),
+                              opacity: inv.clamp(0.0, 1.0),
                               child: Transform.scale(
-                                scale: 0.85 + 0.15 * t,
-                                child: Container(
+                                scale: 0.75 + 0.45 * t,
+                                child: DecoratedBox(
                                   decoration: BoxDecoration(
-                                    color: _tileColor(fx.value).withOpacity(0.35),
-                                    borderRadius: BorderRadius.circular(8),
+                                    gradient: RadialGradient(
+                                      center: Alignment.center,
+                                      radius: 0.9,
+                                      colors: [
+                                        _tileColor(fx.value).withOpacity(0.55),
+                                        _tileColor(fx.value).withOpacity(0.12),
+                                        Colors.transparent,
+                                      ],
+                                      stops: const [0.0, 0.55, 1.0],
+                                    ),
+                                    borderRadius: BorderRadius.circular(14),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: _tileColor(fx.value).withOpacity(0.35),
+                                        blurRadius: 22,
+                                        spreadRadius: 2,
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
@@ -1100,11 +1113,17 @@ void _collapseAndFill() {
                         ),
                       ),
                     ),
-if (_path.length >= 2)
+
+                  if (_path.length >= 2)
                     Positioned.fill(
                       child: IgnorePointer(
                         child: CustomPaint(
-                          painter: _NeonPathPainter(points: _path.toList(), colors: _pathColors.toList(), cellSize: cellSize, gap: gap),
+                          painter: _NeonPathPainter(
+                            points: _path.toList(),
+                            colors: _pathColors.toList(),
+                            cellSize: cellSize,
+                            gap: gap,
+                          ),
                         ),
                       ),
                     ),
@@ -1230,7 +1249,6 @@ if (_path.length >= 2)
               onTap: _openShopSheet,
             ),
           ),
-
         ],
       ),
     );
