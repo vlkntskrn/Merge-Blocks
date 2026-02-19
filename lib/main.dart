@@ -52,7 +52,6 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
 
   bool swapMode = false;
   bool hammerMode = false;
-  bool duplicateMode = false;
   Pos? _swapFirst;
 
   final List<Pos> _path = [];
@@ -89,8 +88,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'swap': 'SWAP',
     'hammer': 'HAMMER',
     'watchAd': 'AD',
-  'swapBonus': 'WATCH AD',
-    'duplicate': 'DUPLICATE',
+  'swapBonus': 'SWAP Bonus',
   'swapPlus': '+1 SWAP',
   'noSwaps': 'No swaps left',
     'shop': 'SHOP',
@@ -111,8 +109,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'swap': 'TAUSCH',
     'hammer': 'HAMMER',
     'watchAd': 'WERBUNG',
-  'swapBonus': 'WATCH AD',
-    'duplicate': 'DUPLICATE',
+  'swapBonus': 'SWAP Bonus',
   'swapPlus': '+1 SWAP',
   'noSwaps': 'Keine Swaps übrig',
     'shop': 'SHOP',
@@ -133,8 +130,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'swap': 'TAKAS',
     'hammer': 'TOKMAK',
     'watchAd': 'REKLAM',
-  'swapBonus': 'Reklam İzle',
-    'duplicate': 'Çoğalt',
+  'swapBonus': 'Swap Bonusu',
   'swapPlus': '+1 SWAP',
   'noSwaps': 'Swap hakkın yok',
     'shop': 'MAĞAZA',
@@ -172,63 +168,83 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   // ===== Game logic =====
 
   void _resetBoard({required bool hard}) {
+    grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
+    _initFirstBoard();
+    _clearPath();
     if (hard) {
       score = BigInt.zero;
       levelIdx = 1;
       diamonds = 0;
       swaps = 0;
     }
-    grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
-    _initFirstBoard();
-    _clearPath();
     _recalcBest();
     setState(() {});
   }
 
-  List<BigInt> _spawnPoolForLevel(int level) {
-    final int minPow = max(1, level); // Level 1 => 2^1 = 2
-    return List<BigInt>.generate(5, (i) => BigInt.one << (minPow + i));
-  }
+  void _initFirstBoard() {
+    // Initial board distribution (only for first open):
+    // values {2,4,8,16,32} with balanced weights (base 4).
+    final all = <Pos>[];
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        all.add(Pos(r, c));
+      }
+    }
+    all.shuffle(_rng);
 
-void _initFirstBoard() {
-  // Initial board uses the same spawn pool as the current level:
-  // Level 1 => 2,4,8,16,32
-  // Level 2 => 4,8,16,32,64
-  // Level 3 => 8,16,32,64,128 ... (equal probability)
-  final pool = _spawnPoolForLevel(levelIdx);
+    BigInt pick() {
+      final roll = _rng.nextDouble();
+      if (roll < 0.10) return BigInt.from(2);
+      if (roll < 0.50) return BigInt.from(4);
+      if (roll < 0.75) return BigInt.from(8);
+      if (roll < 0.90) return BigInt.from(16);
+      return BigInt.from(32);
+    }
 
-  final all = <Pos>[];
-  for (int r = 0; r < rows; r++) {
-    for (int c = 0; c < cols; c++) {
-      all.add(Pos(r, c));
+    // Fill all cells
+    for (final p in all) {
+      grid[p.r][p.c] = pick();
+    }
+
+    // Ensure at least one of each (2,4,8,16,32)
+    const ensure = [2, 4, 8, 16, 32];
+    for (int i = 0; i < ensure.length && i < all.length; i++) {
+      final p = all[i];
+      grid[p.r][p.c] = BigInt.from(ensure[i]);
     }
   }
-  all.shuffle(_rng);
 
-  BigInt pick() => pool[_rng.nextInt(pool.length)];
+  BigInt _spawnTile() {
+    // Smart spawn rules:
+    // - Until 2048 is reached: max spawn = 64
+    // - When 2048 is reached: remove 2, max spawn = 128
+    // - When 4096 is reached: remove 4, min becomes 8, max spawn = 256
+    // - Continues similarly: each milestone removes the smallest spawn and increases max.
+    final m = _maxOnBoard();
+    final int maxPowReached = m <= BigInt.zero ? 1 : (m.bitLength - 1);
 
-  // Fill all cells
-  for (final p in all) {
-    grid[p.r][p.c] = pick();
+    int minPow = 1; // 2
+    if (maxPowReached >= 11) {
+      // Reached at least 2048 (2^11)
+      minPow = max(2, maxPowReached - 9); // 2048->4, 4096->8, 8192->16 ...
+    }
+    final int maxPow = minPow + 5; // keep pool width stable
+
+    // Weighted selection favouring smaller values.
+    final roll = _rng.nextDouble();
+    int pow;
+    if (roll < 0.70) {
+      pow = minPow;
+    } else if (roll < 0.92) {
+      pow = minPow + 1;
+    } else if (roll < 0.985) {
+      pow = minPow + 2;
+    } else {
+      pow = minPow + 3;
+    }
+    pow = pow.clamp(minPow, maxPow);
+    return BigInt.one << pow;
   }
-
-  // Ensure at least one of each pool value (if board has enough cells)
-  for (int i = 0; i < pool.length && i < all.length; i++) {
-    final p = all[i];
-    grid[p.r][p.c] = pool[i];
-  }
-}
-
-BigInt _spawnTile() {
-  // Spawn rules (requested):
-  // Each level spawns the lowest 5 values for that level with equal probability.
-  // Level 1 => 2,4,8,16,32
-  // Level 2 => 4,8,16,32,64
-  // Level 3 => 8,16,32,64,128 ...
-  final pool = _spawnPoolForLevel(levelIdx);
-  return pool[_rng.nextInt(pool.length)];
-}
-
 
   BigInt _goalForLevel(int level) {
     // Level 1 target = 2048, Level 2 = 4096, Level 3 = 8192 ...
@@ -304,10 +320,6 @@ void _onCellDown(Pos p) {
   if (v == null) return;
 
   // Tool modes take priority
-  if (duplicateMode) {
-    _handleDuplicateTap(p);
-    return;
-  }
   if (swapMode) {
     _handleSwapTap(p);
     return;
@@ -373,6 +385,13 @@ void _onCellEnter(Pos p) {
 
   final v = _valueAt(p);
   if (v == null) return;
+
+  // Rule: the chain must start with an equal-value pair.
+  // i.e. the first extension (2nd picked tile) must equal the starting tile.
+  if (_path.length == 1) {
+    final base = _valueAt(_path.first);
+    if (base == null || v != base) return;
+  }
 
   // Old-version rule:
   // Next pick must be same or double of the previous pick (no base-pair arming).
@@ -658,6 +677,7 @@ void _collapseAndFill() {
     grid[a.r][a.c] = grid[p.r][p.c];
     grid[p.r][p.c] = tmp;
 
+    if (swaps > 0) swaps -= 1;
     swapMode = false;
     _swapFirst = null;
     _showToast(t('swap'));
@@ -675,16 +695,14 @@ void _collapseAndFill() {
 
   void _toggleSwap() {
     if (!swapMode) {
-      if (diamonds < 10) {
-        _showToast(t('notEnoughDiamonds'));
+      if (swaps <= 0) {
+        _showToast(t('noSwaps'));
         return;
       }
-      diamonds -= 10;
       swapMode = true;
       hammerMode = false;
-      duplicateMode = false;
       _swapFirst = null;
-      _showToast('-10 💎');
+      _showToast('${t('swap')} (1)');
     } else {
       swapMode = false;
       _swapFirst = null;
@@ -709,40 +727,9 @@ void _collapseAndFill() {
     setState(() {});
   }
 
-
-void _toggleDuplicate() {
-  if (!duplicateMode) {
-    if (diamonds < 20) {
-      _showToast(t('notEnoughDiamonds'));
-      return;
-    }
-    diamonds -= 20;
-    duplicateMode = true;
-    // Disable other tools
-    swapMode = false;
-    hammerMode = false;
-    _swapFirst = null;
-    _showToast('-20 💎');
-  } else {
-    duplicateMode = false;
-  }
-  setState(() {});
-}
-
-void _handleDuplicateTap(Pos p) {
-  final v = grid[p.r][p.c];
-  if (v == null) return;
-  grid[p.r][p.c] = v << 1; // double the value
-  duplicateMode = false;
-  _spawnTick++; // trigger a subtle rebuild for tile
-  _showToast('×2');
-  setState(() {});
-}
-
   void _watchAdReward() {
-    // Rewarded ad: +10 diamonds
-    diamonds += 10;
-    _showToast('+10 💎');
+    swaps += 1;
+    _showToast(t('swapPlus'));
     setState(() {});
   }
 
@@ -1108,8 +1095,10 @@ if (_path.length >= 2)
   final top = _lighten(baseColor, 0.08);
   final bottom = _darken(baseColor, 0.16);
 
-  return IgnorePointer(
-    child: TweenAnimationBuilder<double>(
+  // Pointer handling is done at the board level (GestureDetector) for stable
+  // drag-selection across cells. Per-cell pointer listeners can cause the chain
+  // to stop after the first link on some devices.
+  return TweenAnimationBuilder<double>(
       key: ValueKey('fall_${p.r}_${p.c}_${v?.toString() ?? "n"}_${_spawnTick}'),
       tween: Tween<double>(begin: beginDy, end: 0.0),
       duration: const Duration(milliseconds: 260),
@@ -1158,8 +1147,7 @@ if (_path.length >= 2)
                 ),
         ),
       ),
-    ),
-  );
+    );
 }
 
 
@@ -1176,7 +1164,7 @@ if (_path.length >= 2)
             child: _actionButton(
               icon: swapMode ? Icons.close : Icons.swap_horiz,
               label: t('swap'),
-              sub: '10 💎',
+              sub: '$swaps',
               active: swapMode,
               onTap: _toggleSwap,
             ),
@@ -1196,7 +1184,7 @@ if (_path.length >= 2)
             child: _actionButton(
               icon: Icons.smart_display,
               label: t('swapBonus'),
-              sub: '+10 💎',
+              sub: '+1',
               active: false,
               onTap: _watchAdReward,
             ),
@@ -1214,11 +1202,11 @@ if (_path.length >= 2)
           const SizedBox(width: 10),
           Expanded(
             child: _actionButton(
-              icon: duplicateMode ? Icons.close : Icons.copy,
-              label: t('duplicate'),
-              sub: '20 💎',
-              active: duplicateMode,
-              onTap: _toggleDuplicate,
+              icon: Icons.pause,
+              label: t('pause'),
+              sub: '',
+              active: false,
+              onTap: _openPauseDialog,
             ),
           ),
         ],
