@@ -40,6 +40,20 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   static const double kGap = 10.0;
   static const double kBannerHeight = 60.0; // fixed banner height (Phase 1)
 
+  // UI scaling: shrink top/bottom regions to free board space (auto-compact on small screens).
+  static const double _uiBaseScale = 0.90;
+
+  double _uiScale(BuildContext context) {
+    final h = MediaQuery.of(context).size.height;
+    // Aggressive compacting for small screens.
+    if (h < 720) return 0.85;
+    return _uiBaseScale;
+  }
+  // UI scale used to slightly compact header/bottom areas on small screens.
+  double get uiScale => _uiScale(context);
+
+
+
   final Random _rng = Random();
 
   late List<List<BigInt?>> grid;
@@ -385,13 +399,6 @@ void _onCellEnter(Pos p) {
 
   final v = _valueAt(p);
   if (v == null) return;
-
-  // Rule: the chain must start with an equal-value pair.
-  // i.e. the first extension (2nd picked tile) must equal the starting tile.
-  if (_path.length == 1) {
-    final base = _valueAt(_path.first);
-    if (base == null || v != base) return;
-  }
 
   // Old-version rule:
   // Next pick must be same or double of the previous pick (no base-pair arming).
@@ -798,6 +805,7 @@ void _collapseAndFill() {
 
   @override
   Widget build(BuildContext context) {
+    final uiScale = _uiScale(context);
     final goal = _goalForLevel(levelIdx);
     final curMax = _maxOnBoard();
     final bestLocal = best;
@@ -814,10 +822,10 @@ void _collapseAndFill() {
           children: [
             Column(
               children: [
-                _buildHeader(nowLabel: nowLabel, maxLabel: maxLabel, goalLabel: goalLabel, ratio: ratio),
-                const SizedBox(height: 10),
+                _buildHeader(nowLabel: nowLabel, maxLabel: maxLabel, goalLabel: goalLabel, ratio: ratio, uiScale: uiScale),
+                SizedBox(height: 10 * uiScale),
                 Expanded(child: _buildBoard()),
-                const SizedBox(height: 6),
+                SizedBox(height: 6 * uiScale),
               ],
             ),
             if (_toast != null)
@@ -825,13 +833,13 @@ void _collapseAndFill() {
                 left: 0,
                 right: 0,
                 // Keep toast above action bar + banner.
-                bottom: 14 + kBannerHeight + 112,
+                bottom: 14 + (kBannerHeight * uiScale) + (112 * uiScale),
                 child: Center(
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     decoration: BoxDecoration(
                       color: Colors.black.withOpacity(0.55),
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(16 * uiScale),
                       border: Border.all(color: Colors.white.withOpacity(0.18)),
                     ),
                     child: Text(_toast!, style: _neon(14)),
@@ -846,24 +854,24 @@ void _collapseAndFill() {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _buildBottomBar(),
-            _buildBannerAdPlaceholder(),
+            _buildBottomBar(uiScale: uiScale),
+            _buildBannerAdPlaceholder(uiScale: uiScale),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBannerAdPlaceholder() {
+  Widget _buildBannerAdPlaceholder({required double uiScale}) {
     // Phase 1: fixed-size banner slot to prevent board overlap.
     // Replace this Container with real AdMob Banner widget when integrating ads.
     return SizedBox(
-      height: kBannerHeight,
+      height: kBannerHeight * uiScale,
       child: Container(
-        margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+        margin: EdgeInsets.fromLTRB(14 * uiScale, 0, 14 * uiScale, 10 * uiScale),
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(14 * uiScale),
           border: Border.all(color: Colors.white.withOpacity(0.10)),
         ),
         child: Center(
@@ -871,7 +879,7 @@ void _collapseAndFill() {
             'BANNER AD',
             style: TextStyle(
               color: Colors.white.withOpacity(0.65),
-              fontSize: 12,
+              fontSize: 12 * uiScale,
               fontWeight: FontWeight.w900,
               letterSpacing: 1.1,
             ),
@@ -882,62 +890,65 @@ void _collapseAndFill() {
   }
 
   Widget _buildHeader({
+    required double uiScale,
     required String nowLabel,
     required String maxLabel,
     required String goalLabel,
     required double ratio,
   }) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+      padding: EdgeInsets.fromLTRB(14 * uiScale, 10 * uiScale, 14 * uiScale, 6 * uiScale),
       child: Column(
         children: [
           Row(
             children: [
               _pill(
+                uiScale: uiScale,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.diamond, size: 18, color: Color(0xFFB388FF)),
-                    const SizedBox(width: 6),
-                    Text('$diamonds', style: _neon(16)),
-                    const SizedBox(width: 8),
-                    _tinyButton(icon: Icons.add, onTap: _openShopSheet),
+                    Icon(Icons.diamond, size: 18 * uiScale, color: const Color(0xFFB388FF)),
+                    SizedBox(width: 6 * uiScale),
+                    Text('$diamonds', style: _neon(16 * uiScale)),
+                    SizedBox(width: 8 * uiScale),
+                    _tinyButton(icon: Icons.add, onTap: _openShopSheet, uiScale: uiScale),
                   ],
                 ),
               ),
               const Spacer(),
-              Text(_fmtBig(score), style: _neon(34, opacity: 0.98)),
+              Text(_fmtBig(score), style: _neon(34 * uiScale, opacity: 0.98)),
               const Spacer(),
               _pill(
+                uiScale: uiScale,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.workspace_premium, size: 18, color: Color(0xFFFFD54F)),
-                    const SizedBox(width: 6),
-                    Text('Level $levelIdx', style: _neon(14)),
+                    Icon(Icons.workspace_premium, size: 18 * uiScale, color: const Color(0xFFFFD54F)),
+                    SizedBox(width: 6 * uiScale),
+                    Text('Level $levelIdx', style: _neon(14 * uiScale)),
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
-              _tinyButton(icon: Icons.settings, onTap: _openSettingsSheet),
+              SizedBox(width: 10 * uiScale),
+              _tinyButton(icon: Icons.settings, onTap: _openSettingsSheet, uiScale: uiScale),
             ],
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: 10 * uiScale),
           Row(
             children: [
-              Expanded(child: _miniStatChip(t('now'), nowLabel)),
-              const SizedBox(width: 10),
-              Expanded(child: _miniStatChip(t('max'), maxLabel)),
-              const SizedBox(width: 10),
-              Expanded(child: _miniStatChip(t('next'), goalLabel)),
+              Expanded(child: _miniStatChip(t('now'), nowLabel, uiScale: uiScale)),
+              SizedBox(width: 10 * uiScale),
+              Expanded(child: _miniStatChip(t('max'), maxLabel, uiScale: uiScale)),
+              SizedBox(width: 10 * uiScale),
+              Expanded(child: _miniStatChip(t('next'), goalLabel, uiScale: uiScale)),
             ],
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: 10 * uiScale),
           ClipRRect(
             borderRadius: BorderRadius.circular(999),
             child: LinearProgressIndicator(
               value: ratio,
-              minHeight: 10,
+              minHeight: 10 * uiScale,
               backgroundColor: Colors.white.withOpacity(0.10),
               valueColor: AlwaysStoppedAnimation<Color>(Colors.white.withOpacity(0.75)),
             ),
@@ -947,12 +958,12 @@ void _collapseAndFill() {
     );
   }
 
-  Widget _pill({required Widget child}) {
+  Widget _pill({required Widget child, double uiScale = 1.0}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: 12 * uiScale, vertical: 8 * uiScale),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16 * uiScale),
         border: Border.all(color: Colors.white.withOpacity(0.14)),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 16, offset: const Offset(0, 8))],
       ),
@@ -960,25 +971,25 @@ void _collapseAndFill() {
     );
   }
 
-  Widget _tinyButton({required IconData icon, required VoidCallback onTap}) {
+  Widget _tinyButton({required IconData icon, required VoidCallback onTap, double uiScale = 1.0}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 40,
-        height: 34,
+        width: 40 * uiScale,
+        height: 34 * uiScale,
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.10),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(14 * uiScale),
           border: Border.all(color: Colors.white.withOpacity(0.16)),
         ),
-        child: Icon(icon, size: 18, color: Colors.white.withOpacity(0.92)),
+        child: Icon(icon, size: 18 * uiScale, color: Colors.white.withOpacity(0.92)),
       ),
     );
   }
 
-  Widget _miniStatChip(String label, String value) {
+  Widget _miniStatChip(String label, String value, {double uiScale = 1.0}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: EdgeInsets.symmetric(horizontal: 12 * uiScale, vertical: 10 * uiScale),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.06),
         borderRadius: BorderRadius.circular(18),
@@ -986,9 +997,9 @@ void _collapseAndFill() {
       ),
       child: Column(
         children: [
-          Text(label, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 4),
-          Text(value, style: _neon(14, opacity: 0.95)),
+          Text(label, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12 * uiScale, fontWeight: FontWeight.w800)),
+          SizedBox(height: 4 * uiScale),
+          Text(value, style: _neon(14 * uiScale, opacity: 0.95)),
         ],
       ),
     );
@@ -997,13 +1008,19 @@ void _collapseAndFill() {
   Widget _buildBoard() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final boardW = min(constraints.maxWidth, 430.0) * 0.96;
         final gap = kGap;
-        final cellSizeBase = (boardW - (cols - 1) * gap) / cols;
-        final cellSize = cellSizeBase * 0.87;
+        final maxW = constraints.maxWidth * 0.98;
+        final maxH = constraints.maxHeight * 0.98;
+
+        final cellSize = min(
+          (maxW - (cols - 1) * gap) / cols,
+          (maxH - (rows - 1) * gap) / rows,
+        );
+
+        final boardW = cols * cellSize + (cols - 1) * gap;
         final boardH = rows * cellSize + (rows - 1) * gap;
 
-        return Center(
+return Center(
           child: SizedBox(
             width: boardW,
             height: boardH,
@@ -1095,10 +1112,11 @@ if (_path.length >= 2)
   final top = _lighten(baseColor, 0.08);
   final bottom = _darken(baseColor, 0.16);
 
-  // Pointer handling is done at the board level (GestureDetector) for stable
-  // drag-selection across cells. Per-cell pointer listeners can cause the chain
-  // to stop after the first link on some devices.
-  return TweenAnimationBuilder<double>(
+  return Listener(
+    onPointerDown: (_) => _onCellDown(p),
+    onPointerMove: (_) => _onCellEnter(p),
+    onPointerUp: (_) => _onCellUp(),
+    child: TweenAnimationBuilder<double>(
       key: ValueKey('fall_${p.r}_${p.c}_${v?.toString() ?? "n"}_${_spawnTick}'),
       tween: Tween<double>(begin: beginDy, end: 0.0),
       duration: const Duration(milliseconds: 260),
@@ -1147,13 +1165,14 @@ if (_path.length >= 2)
                 ),
         ),
       ),
-    );
+    ),
+  );
 }
 
 
-  Widget _buildBottomBar() {
+  Widget _buildBottomBar({required double uiScale}) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+      padding: EdgeInsets.fromLTRB(14 * uiScale, 10 * uiScale, 14 * uiScale, 14 * uiScale),
       decoration: BoxDecoration(
         color: const Color(0xFF06102C),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 20, offset: const Offset(0, -10))],
@@ -1161,7 +1180,7 @@ if (_path.length >= 2)
       child: Row(
         children: [
           Expanded(
-            child: _actionButton(
+            child: _actionButton(uiScale: uiScale,
               icon: swapMode ? Icons.close : Icons.swap_horiz,
               label: t('swap'),
               sub: '$swaps',
@@ -1169,9 +1188,9 @@ if (_path.length >= 2)
               onTap: _toggleSwap,
             ),
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: 10 * uiScale),
           Expanded(
-            child: _actionButton(
+            child: _actionButton(uiScale: uiScale,
               icon: hammerMode ? Icons.close : Icons.gavel,
               label: t('hammer'),
               sub: '7 💎',
@@ -1179,9 +1198,9 @@ if (_path.length >= 2)
               onTap: _toggleHammer,
             ),
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: 10 * uiScale),
           Expanded(
-            child: _actionButton(
+            child: _actionButton(uiScale: uiScale,
               icon: Icons.smart_display,
               label: t('swapBonus'),
               sub: '+1',
@@ -1189,9 +1208,9 @@ if (_path.length >= 2)
               onTap: _watchAdReward,
             ),
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: 10 * uiScale),
           Expanded(
-            child: _actionButton(
+            child: _actionButton(uiScale: uiScale,
               icon: Icons.shopping_cart,
               label: t('shop'),
               sub: '',
@@ -1199,22 +1218,13 @@ if (_path.length >= 2)
               onTap: _openShopSheet,
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _actionButton(
-              icon: Icons.pause,
-              label: t('pause'),
-              sub: '',
-              active: false,
-              onTap: _openPauseDialog,
-            ),
-          ),
-        ],
+],
       ),
     );
   }
 
   Widget _actionButton({
+    required double uiScale,
     required IconData icon,
     required String label,
     required String sub,
@@ -1225,9 +1235,9 @@ if (_path.length >= 2)
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: EdgeInsets.symmetric(vertical: 12 * uiScale),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(18 * uiScale),
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
@@ -1241,8 +1251,8 @@ if (_path.length >= 2)
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 22, color: Colors.white.withOpacity(0.95)),
-            const SizedBox(height: 6),
+            Icon(icon, size: 22 * uiScale, color: Colors.white.withOpacity(0.95)),
+            SizedBox(height: 6 * uiScale),
             Text(label, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 11, fontWeight: FontWeight.w900)),
             if (sub.isNotEmpty) ...[
               const SizedBox(height: 2),
@@ -1291,17 +1301,17 @@ if (_path.length >= 2)
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.06),
-                        borderRadius: BorderRadius.circular(18),
+                        borderRadius: BorderRadius.circular(18 * uiScale),
                         border: Border.all(color: Colors.white.withOpacity(0.12)),
                       ),
                       child: Row(
                         children: [
                           const Icon(Icons.diamond, color: Color(0xFFB388FF)),
-                          const SizedBox(width: 10),
+                          SizedBox(width: 10 * uiScale),
                           Text('$gems 💎', style: _neon(16)),
                           const Spacer(),
                           Text('\$$usd', style: _neon(16, opacity: 0.9)),
-                          const SizedBox(width: 10),
+                          SizedBox(width: 10 * uiScale),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
@@ -1317,7 +1327,7 @@ if (_path.length >= 2)
                   ),
                 );
               }),
-              const SizedBox(height: 6),
+              SizedBox(height: 6 * uiScale),
               Text(
                 'Not: Bu sayfa şimdilik “test purchase” gibi çalışır. Gerçek IAP entegrasyonunu istersen ekleriz.',
                 style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 11, fontWeight: FontWeight.w600),
@@ -1355,7 +1365,7 @@ if (_path.length >= 2)
                   onSelectionChanged: (s) => setState(() => lang = s.first),
                 ),
               ),
-              const SizedBox(height: 10),
+              SizedBox(height: 10 * uiScale),
               _settingsRow(
                 title: 'Reset',
                 child: FilledButton(
@@ -1384,7 +1394,7 @@ if (_path.length >= 2)
       child: Row(
         children: [
           Expanded(child: Text(title, style: _neon(13, opacity: 0.9))),
-          const SizedBox(width: 10),
+          SizedBox(width: 10 * uiScale),
           child,
         ],
       ),
