@@ -52,6 +52,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
 
   bool swapMode = false;
   bool hammerMode = false;
+  bool duplicateMode = false;
   Pos? _swapFirst;
 
   final List<Pos> _path = [];
@@ -101,7 +102,9 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'broken': 'Broken!',
     'shopTitle': 'Diamond Shop',
     'buy': 'Buy',
-  };
+      'watchDiamonds': 'Earn Diamonds',
+    'duplicate': 'DUPLICATE x2',
+};
 
   static const Map<String, String> _de = {
     'now': 'JETZT',
@@ -122,7 +125,9 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'broken': 'Zerbrochen!',
     'shopTitle': 'Diamant-Shop',
     'buy': 'Kaufen',
-  };
+      'watchDiamonds': 'Diamanten',
+    'duplicate': 'DUPLIZIEREN x2',
+};
 
   static const Map<String, String> _tr = {
     'now': 'ŞİMDİ',
@@ -143,7 +148,9 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'broken': 'Kırıldı!',
     'shopTitle': 'Elmas Mağazası',
     'buy': 'Satın al',
-  };
+      'watchDiamonds': 'Elmas Kazan',
+    'duplicate': 'DUBLICATE x2',
+};
 
   String t(String key) {
     final dict = switch (lang) {
@@ -183,69 +190,23 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
   void _initFirstBoard() {
-    // Initial board distribution (only for first open):
-    // values {2,4,8,16,32} with balanced weights (base 4).
-    final all = <Pos>[];
-    for (int r = 0; r < rows; r++) {
-      for (int c = 0; c < cols; c++) {
-        all.add(Pos(r, c));
-      }
-    }
-    all.shuffle(_rng);
-
-    BigInt pick() {
-      final roll = _rng.nextDouble();
-      if (roll < 0.10) return BigInt.from(2);
-      if (roll < 0.50) return BigInt.from(4);
-      if (roll < 0.75) return BigInt.from(8);
-      if (roll < 0.90) return BigInt.from(16);
-      return BigInt.from(32);
-    }
-
-    // Fill all cells
-    for (final p in all) {
-      grid[p.r][p.c] = pick();
-    }
-
-    // Ensure at least one of each (2,4,8,16,32)
-    const ensure = [2, 4, 8, 16, 32];
-    for (int i = 0; i < ensure.length && i < all.length; i++) {
-      final p = all[i];
-      grid[p.r][p.c] = BigInt.from(ensure[i]);
+  for (int r = 0; r < rows; r++) {
+    for (int c = 0; c < cols; c++) {
+      grid[r][c] = _spawnTile();
     }
   }
+}
 
   BigInt _spawnTile() {
-    // Smart spawn rules:
-    // - Until 2048 is reached: max spawn = 64
-    // - When 2048 is reached: remove 2, max spawn = 128
-    // - When 4096 is reached: remove 4, min becomes 8, max spawn = 256
-    // - Continues similarly: each milestone removes the smallest spawn and increases max.
-    final m = _maxOnBoard();
-    final int maxPowReached = m <= BigInt.zero ? 1 : (m.bitLength - 1);
-
-    int minPow = 1; // 2
-    if (maxPowReached >= 11) {
-      // Reached at least 2048 (2^11)
-      minPow = max(2, maxPowReached - 9); // 2048->4, 4096->8, 8192->16 ...
-    }
-    final int maxPow = minPow + 5; // keep pool width stable
-
-    // Weighted selection favouring smaller values.
-    final roll = _rng.nextDouble();
-    int pow;
-    if (roll < 0.70) {
-      pow = minPow;
-    } else if (roll < 0.92) {
-      pow = minPow + 1;
-    } else if (roll < 0.985) {
-      pow = minPow + 2;
-    } else {
-      pow = minPow + 3;
-    }
-    pow = pow.clamp(minPow, maxPow);
-    return BigInt.one << pow;
-  }
+  // Level-based uniform spawn:
+  // Level 1: 2-4-8-16-32
+  // Level 2: 4-8-16-32-64
+  // Level 3: 8-16-32-64-128
+  // General: 2^level .. 2^(level+4) (5 values, uniform)
+  final start = BigInt.one << levelIdx; // levelIdx=1 => 2
+  final pool = List<BigInt>.generate(5, (i) => start << i);
+  return pool[_rng.nextInt(pool.length)];
+}
 
   BigInt _goalForLevel(int level) {
     // Level 1 target = 2048, Level 2 = 4096, Level 3 = 8192 ...
@@ -719,21 +680,23 @@ void _collapseAndFill() {
   }
 
   void _toggleSwap() {
-    if (!swapMode) {
-      if (swaps <= 0) {
-        _showToast(t('noSwaps'));
-        return;
-      }
-      swapMode = true;
-      hammerMode = false;
-      _swapFirst = null;
-      _showToast('${t('swap')} (1)');
-    } else {
-      swapMode = false;
-      _swapFirst = null;
+  if (!swapMode) {
+    if (diamonds < 10) {
+      _showToast(t('notEnoughDiamonds'));
+      return;
     }
-    setState(() {});
+    diamonds -= 10;
+    swapMode = true;
+    hammerMode = false;
+    duplicateMode = false;
+    _swapFirst = null;
+    _showToast('-10 💎');
+  } else {
+    swapMode = false;
+    _swapFirst = null;
   }
+  setState(() {});
+}
 
   void _toggleHammer() {
     if (!hammerMode) {
@@ -752,11 +715,38 @@ void _collapseAndFill() {
     setState(() {});
   }
 
-  void _watchAdReward() {
-    swaps += 1;
-    _showToast(t('swapPlus'));
-    setState(() {});
+void _toggleDuplicate() {
+  if (!duplicateMode) {
+    if (diamonds < 20) {
+      _showToast(t('notEnoughDiamonds'));
+      return;
+    }
+    diamonds -= 20;
+    duplicateMode = true;
+    swapMode = false;
+    hammerMode = false;
+    _swapFirst = null;
+    _showToast('-20 💎');
+  } else {
+    duplicateMode = false;
   }
+  setState(() {});
+}
+
+void _handleDuplicateTap(Pos p) {
+  final v = _valueAt(p);
+  if (v == null) return;
+  grid[p.r][p.c] = v << 1;
+  duplicateMode = false;
+  _showToast('x2');
+  setState(() {});
+}
+
+  void _watchAdReward() {
+  diamonds += 10;
+  _showToast('+10 💎');
+  setState(() {});
+}
 
   // ===== UI helpers =====
 
@@ -1019,94 +1009,114 @@ void _collapseAndFill() {
     );
   }
 
-  Widget _buildBoard() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final boardW = min(constraints.maxWidth, 430.0) * 0.96;
-        final gap = kGap;
-        final cellSizeBase = (boardW - (cols - 1) * gap) / cols;
-        final cellSize = cellSizeBase * 0.87;
-        final boardH = rows * cellSize + (rows - 1) * gap;
+  
+Widget _buildBoard() {
+  return LayoutBuilder(
+    builder: (context, constraints) {
+      final gap = kGap;
+      final availW = constraints.maxWidth;
+      final availH = constraints.maxHeight;
 
-        return Center(
-          child: SizedBox(
-            width: boardW,
-            height: boardH,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onPanStart: (d) {
-                final p = _hitTestPos(d.localPosition, cellSize, gap);
-                if (p != null) _onCellDown(p);
-              },
-              onPanUpdate: (d) {
-                final p = _hitTestPos(d.localPosition, cellSize, gap);
-                if (p != null) _onCellEnter(p);
-              },
-              onPanEnd: (_) => _onCellUp(),
-              onPanCancel: _onCellUp,
-              onTapDown: (d) {
-                final p = _hitTestPos(d.localPosition, cellSize, gap);
-                if (p != null) _onCellDown(p);
-              },
-              onTapUp: (_) => _onCellUp(),
-              child: Stack(
-                children: [
-                  for (int r = 0; r < rows; r++)
-                    for (int c = 0; c < cols; c++)
-                      Positioned(
-                        left: c * (cellSize + gap),
-                        top: r * (cellSize + gap),
-                        width: cellSize,
-                        height: cellSize,
-                        child: _cellWidget(Pos(r, c), cellSize),
-                      ),
-                  
-                  // Vanish FX for consumed tiles
-                  for (final fx in _vanishFx)
+      final cellW = (availW - (cols - 1) * gap) / cols;
+      final cellH = (availH - (rows - 1) * gap) / rows;
+      final cellSize = max(6.0, min(cellW, cellH));
+
+      final boardW = cols * cellSize + (cols - 1) * gap;
+      final boardH = rows * cellSize + (rows - 1) * gap;
+
+      void feed(Offset from, Offset to) {
+        final dx = to.dx - from.dx;
+        final dy = to.dy - from.dy;
+        final dist = sqrt(dx * dx + dy * dy);
+        final step = max(1.0, (cellSize + gap) / 3);
+        final n = max(1, (dist / step).ceil());
+        for (int i = 1; i <= n; i++) {
+          final tt = i / n;
+          final o = Offset(from.dx + dx * tt, from.dy + dy * tt);
+          final p = _hitTestPos(o, cellSize, gap);
+          if (p != null) _onCellEnter(p);
+        }
+      }
+
+      return Center(
+        child: SizedBox(
+          width: boardW,
+          height: boardH,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (d) {
+              _lastPanLocal = d.localPosition;
+              final p = _hitTestPos(d.localPosition, cellSize, gap);
+              if (p != null) _onCellDown(p);
+            },
+            onPanUpdate: (d) {
+              final prev = _lastPanLocal ?? d.localPosition;
+              feed(prev, d.localPosition);
+              _lastPanLocal = d.localPosition;
+            },
+            onPanEnd: (_) {
+              _lastPanLocal = null;
+              _onCellUp();
+            },
+            onPanCancel: () {
+              _lastPanLocal = null;
+              _onCellUp();
+            },
+            onTapDown: (d) {
+              final p = _hitTestPos(d.localPosition, cellSize, gap);
+              if (p != null) _onCellDown(p);
+            },
+            onTapUp: (_) => _onCellUp(),
+            child: Stack(
+              children: [
+                for (int r = 0; r < rows; r++)
+                  for (int c = 0; c < cols; c++)
                     Positioned(
-                      left: fx.pos.c * (cellSize + gap),
-                      top: fx.pos.r * (cellSize + gap),
+                      left: c * (cellSize + gap),
+                      top: r * (cellSize + gap),
                       width: cellSize,
                       height: cellSize,
-                      child: IgnorePointer(
-                        child: TweenAnimationBuilder<double>(
-                          key: ValueKey('van_${fx.pos.r}_${fx.pos.c}_${fx.tick}'),
-                          tween: Tween<double>(begin: 1.0, end: 0.0),
-                          duration: const Duration(milliseconds: 280),
-                          curve: Curves.easeIn,
-                          builder: (context, t, _) {
-                            return Opacity(
-                              opacity: t.clamp(0.0, 1.0),
-                              child: Transform.scale(
-                                scale: 0.85 + 0.15 * t,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: _tileColor(fx.value).withOpacity(0.35),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
+                      child: _cellWidget(Pos(r, c), cellSize),
+                    ),
+
+                // Premium vanish FX (if present)
+                for (final fx in _vanishFx)
+                  Positioned(
+                    left: fx.pos.c * (cellSize + gap),
+                    top: fx.pos.r * (cellSize + gap),
+                    width: cellSize,
+                    height: cellSize,
+                    child: _vanishFxWidget(fx, cellSize),
+                  ),
+
+                if (_path.length >= 2)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: _NeonPathPainter(
+                          points: _path,
+                          colors: _pathColors,
+                          cellSize: cellSize,
+                          gap: gap,
                         ),
                       ),
                     ),
-if (_path.length >= 2)
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: CustomPaint(
-                          painter: _NeonPathPainter(points: _path.toList(), colors: _pathColors.toList(), cellSize: cellSize, gap: gap),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+                  ),
+              ],
             ),
           ),
-        );
-      },
-    );
+        ),
+      );
+    },
+  );
+}
+  // Premium merge vanish FX overlay (safe stub).
+  // If you later want a richer effect, we can animate opacity/scale here.
+  Widget _vanishFxWidget(_VanishFx fx, double size) {
+    return const SizedBox.shrink();
   }
+
+
 
   Widget _cellWidget(Pos p, double size) {
   final v = grid[p.r][p.c];
@@ -1120,11 +1130,7 @@ if (_path.length >= 2)
   final top = _lighten(baseColor, 0.08);
   final bottom = _darken(baseColor, 0.16);
 
-  return Listener(
-    onPointerDown: (_) => _onCellDown(p),
-    onPointerMove: (_) => _onCellEnter(p),
-    onPointerUp: (_) => _onCellUp(),
-    child: TweenAnimationBuilder<double>(
+  return TweenAnimationBuilder<double>(
       key: ValueKey('fall_${p.r}_${p.c}_${v?.toString() ?? "n"}_${_spawnTick}'),
       tween: Tween<double>(begin: beginDy, end: 0.0),
       duration: const Duration(milliseconds: 260),
@@ -1173,73 +1179,72 @@ if (_path.length >= 2)
                 ),
         ),
       ),
-    ),
-  );
+    );
 }
 
 
   Widget _buildBottomBar() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF06102C),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 20, offset: const Offset(0, -10))],
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _actionButton(
-              icon: swapMode ? Icons.close : Icons.swap_horiz,
-              label: t('swap'),
-              sub: '$swaps',
-              active: swapMode,
-              onTap: _toggleSwap,
-            ),
+  return Container(
+    padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+    decoration: BoxDecoration(
+      color: const Color(0xFF06102C),
+      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 20, offset: const Offset(0, -10))],
+    ),
+    child: Row(
+      children: [
+        Expanded(
+          child: _actionButton(
+            icon: swapMode ? Icons.close : Icons.swap_horiz,
+            label: t('swap'),
+            sub: '10 💎',
+            active: swapMode,
+            onTap: _toggleSwap,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _actionButton(
-              icon: hammerMode ? Icons.close : Icons.gavel,
-              label: t('hammer'),
-              sub: '7 💎',
-              active: hammerMode,
-              onTap: _toggleHammer,
-            ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _actionButton(
+            icon: hammerMode ? Icons.close : Icons.gavel,
+            label: t('hammer'),
+            sub: '7 💎',
+            active: hammerMode,
+            onTap: _toggleHammer,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _actionButton(
-              icon: Icons.smart_display,
-              label: t('swapBonus'),
-              sub: '+1',
-              active: false,
-              onTap: _watchAdReward,
-            ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _actionButton(
+            icon: Icons.smart_display,
+            label: t('watchDiamonds'),
+            sub: '+10 💎',
+            active: false,
+            onTap: _watchAdReward,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _actionButton(
-              icon: Icons.shopping_cart,
-              label: t('shop'),
-              sub: '',
-              active: false,
-              onTap: _openShopSheet,
-            ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _actionButton(
+            icon: duplicateMode ? Icons.close : Icons.copy,
+            label: t('duplicate'),
+            sub: '20 💎',
+            active: duplicateMode,
+            onTap: _toggleDuplicate,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _actionButton(
-              icon: Icons.pause,
-              label: t('pause'),
-              sub: '',
-              active: false,
-              onTap: _openPauseDialog,
-            ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _actionButton(
+            icon: Icons.shopping_cart,
+            label: t('shop'),
+            sub: '',
+            active: false,
+            onTap: _openShopSheet,
           ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
+}
 
   Widget _actionButton({
     required IconData icon,
