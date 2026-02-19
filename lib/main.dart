@@ -57,6 +57,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   final List<Pos> _path = [];
   final List<Color> _pathColors = <Color>[]; // per-segment chain line colors
   bool _dragging = false;
+  Offset? _lastPanLocal; // for drag sampling across cells
 
   // Tick used to force rebuild keys for spawn animations.
   int _spawnTick = 0;
@@ -284,6 +285,37 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
 
+  void _handlePanUpdate(Offset local, double cellSize, double gap) {
+    final prev = _lastPanLocal;
+    _lastPanLocal = local;
+
+    if (prev == null) {
+      final p = _hitTestPos(local, cellSize, gap);
+      if (p != null) _onCellEnter(p);
+      return;
+    }
+
+    final delta = local - prev;
+    final dist = delta.distance;
+    if (dist <= 0.1) {
+      final p = _hitTestPos(local, cellSize, gap);
+      if (p != null) _onCellEnter(p);
+      return;
+    }
+
+    // Sample intermediate points to avoid skipping diagonals when the pointer moves fast.
+    final step = max(6.0, (cellSize + gap) / 3);
+    final n = (dist / step).ceil().clamp(1, 40);
+
+    for (int i = 1; i <= n; i++) {
+      final t = i / n;
+      final pt = Offset(prev.dx + delta.dx * t, prev.dy + delta.dy * t);
+      final p = _hitTestPos(pt, cellSize, gap);
+      if (p != null) _onCellEnter(p);
+    }
+  }
+
+
 void _clearPath() {
   _path.clear();
   _pathColors.clear();
@@ -385,13 +417,6 @@ void _onCellEnter(Pos p) {
 
   final v = _valueAt(p);
   if (v == null) return;
-
-  // Rule: the chain must start with an equal-value pair.
-  // i.e. the first extension (2nd picked tile) must equal the starting tile.
-  if (_path.length == 1) {
-    final base = _valueAt(_path.first);
-    if (base == null || v != base) return;
-  }
 
   // Old-version rule:
   // Next pick must be same or double of the previous pick (no base-pair arming).
@@ -1095,10 +1120,11 @@ if (_path.length >= 2)
   final top = _lighten(baseColor, 0.08);
   final bottom = _darken(baseColor, 0.16);
 
-  // Pointer handling is done at the board level (GestureDetector) for stable
-  // drag-selection across cells. Per-cell pointer listeners can cause the chain
-  // to stop after the first link on some devices.
-  return TweenAnimationBuilder<double>(
+  return Listener(
+    onPointerDown: (_) => _onCellDown(p),
+    onPointerMove: (_) => _onCellEnter(p),
+    onPointerUp: (_) => _onCellUp(),
+    child: TweenAnimationBuilder<double>(
       key: ValueKey('fall_${p.r}_${p.c}_${v?.toString() ?? "n"}_${_spawnTick}'),
       tween: Tween<double>(begin: beginDy, end: 0.0),
       duration: const Duration(milliseconds: 260),
@@ -1147,7 +1173,8 @@ if (_path.length >= 2)
                 ),
         ),
       ),
-    );
+    ),
+  );
 }
 
 
