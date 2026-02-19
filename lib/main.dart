@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 
 void main() {
@@ -12,6 +13,7 @@ class MergeBlocksApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      restorationScopeId: 'app',
       title: 'MERGE BLOCKS NEON CHAIN',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -33,14 +35,94 @@ class UltraGamePage extends StatefulWidget {
   State<UltraGamePage> createState() => _UltraGamePageState();
 }
 
-class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateMixin {
+class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateMixin, WidgetsBindingObserver, RestorationMixin {
   // ===== Board config =====
   static const int cols = 5;
   static const int rows = 7;
   static const double kGap = 10.0;
-  static const double kBannerHeight = 60.0; // fixed banner height (Phase 1)
+  static const double kBannerHeight = 50.0; // fixed banner height (Phase 1)
 
-  final Random _rng = Random();
+// --- State restoration (DartPad-friendly persistence) ---
+final RestorableStringN _saveBlob = RestorableStringN(null);
+bool _didRestore = false;
+
+@override
+String? get restorationId => 'ultra_game';
+
+@override
+void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
+  registerForRestoration(_saveBlob, 'save_blob');
+  if (_saveBlob.value != null) {
+    _loadFromBlob(_saveBlob.value!);
+    _didRestore = true;
+  }
+}
+
+void _saveToBlob() {
+  final flat = <String?>[];
+  for (int r = 0; r < rows; r++) {
+    for (int c = 0; c < cols; c++) {
+      final v = grid[r][c];
+      flat.add(v == null ? null : v.toString());
+    }
+  }
+  final data = <String, dynamic>{
+    'rows': rows,
+    'cols': cols,
+    'grid': flat,
+    'score': score.toString(),
+    'best': best.toString(),
+    'levelIdx': levelIdx,
+    'diamonds': diamonds,
+    'swaps': swaps,
+    'lang': lang.index,
+  };
+  _saveBlob.value = jsonEncode(data);
+}
+
+void _loadFromBlob(String blob) {
+  try {
+    final Map<String, dynamic> data = jsonDecode(blob) as Map<String, dynamic>;
+    final int sr = (data['rows'] as num?)?.toInt() ?? rows;
+    final int sc = (data['cols'] as num?)?.toInt() ?? cols;
+    final List<dynamic>? flat = data['grid'] as List<dynamic>?;
+    if (flat != null && sr == rows && sc == cols && flat.length == rows * cols) {
+      grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
+      for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+          final idx = r * cols + c;
+          final v = flat[idx];
+          grid[r][c] = (v == null) ? null : BigInt.parse(v.toString());
+        }
+      }
+    } else {
+      grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
+      _initFirstBoard();
+    }
+
+    score = BigInt.parse((data['score'] ?? '0').toString());
+    best = BigInt.parse((data['best'] ?? '0').toString());
+    levelIdx = (data['levelIdx'] as num?)?.toInt() ?? 1;
+    diamonds = (data['diamonds'] as num?)?.toInt() ?? 0;
+    swaps = (data['swaps'] as num?)?.toInt() ?? 0;
+
+    final li = (data['lang'] as num?)?.toInt();
+    if (li != null && li >= 0 && li < AppLang.values.length) {
+      lang = AppLang.values[li];
+    }
+
+    _clearPath();
+    _recalcBest();
+    if (mounted) setState(() {});
+  } catch (_) {
+    grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
+    _initFirstBoard();
+    _clearPath();
+    _recalcBest();
+  }
+}
+
+Random _rng = Random();
 
   late List<List<BigInt?>> grid;
 
@@ -164,18 +246,42 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   @override
   void initState() {
     super.initState();
-    _resetBoard(hard: true);
+    WidgetsBinding.instance.addObserver(this);
+
+    // Ensure grid exists immediately to avoid late-init errors.
+    grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
+
+    // If no restoration happened, start a new game after first frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_didRestore && _saveBlob.value == null) {
+        _resetBoard(hard: true);
+        _saveToBlob();
+      }
+    });
+  }
+
+
+  // ===== Game logic =====
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      _saveToBlob();
+    }
   }
 
   @override
   void dispose() {
     _toastTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _saveToBlob();
     super.dispose();
   }
 
-  // ===== Game logic =====
-
-  void _resetBoard({required bool hard}) {
+void _resetBoard({required bool hard}) {
     grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
     _initFirstBoard();
     _clearPath();
@@ -186,6 +292,7 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
       swaps = 0;
     }
     _recalcBest();
+    _saveToBlob();
     setState(() {});
   }
 
@@ -471,6 +578,7 @@ void _applyMergeChain(List<Pos> chain) {
 
   if (pos.length < 2) {
     _clearPath();
+    _saveToBlob();
     setState(() {});
     return;
   }
@@ -650,6 +758,7 @@ void _collapseAndFill() {
     if (_swapFirst == null) {
       _swapFirst = p;
       _showToast('1/2');
+      _saveToBlob();
       setState(() {});
       return;
     }
@@ -695,6 +804,7 @@ void _collapseAndFill() {
     swapMode = false;
     _swapFirst = null;
   }
+  _saveToBlob();
   setState(() {});
 }
 
@@ -712,6 +822,7 @@ void _collapseAndFill() {
     } else {
       hammerMode = false;
     }
+    _saveToBlob();
     setState(() {});
   }
 
@@ -730,6 +841,7 @@ void _toggleDuplicate() {
   } else {
     duplicateMode = false;
   }
+  _saveToBlob();
   setState(() {});
 }
 
@@ -739,12 +851,14 @@ void _handleDuplicateTap(Pos p) {
   grid[p.r][p.c] = v << 1;
   duplicateMode = false;
   _showToast('x2');
+  _saveToBlob();
   setState(() {});
 }
 
   void _watchAdReward() {
   diamonds += 10;
   _showToast('+10 💎');
+  _saveToBlob();
   setState(() {});
 }
 
@@ -1185,7 +1299,7 @@ Widget _buildBoard() {
 
   Widget _buildBottomBar() {
   return Container(
-    padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+    padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
     decoration: BoxDecoration(
       color: const Color(0xFF06102C),
       boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 20, offset: const Offset(0, -10))],
