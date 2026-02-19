@@ -54,10 +54,6 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   bool hammerMode = false;
   bool duplicateMode = false;
   Pos? _swapFirst;
-  Pos? _dupSource;
-
-  // Board-level drag sampling to avoid missing cells on fast drags.
-  Offset? _lastPanLocal;
 
   final List<Pos> _path = [];
   final List<Color> _pathColors = <Color>[]; // per-segment chain line colors
@@ -137,7 +133,8 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'swap': 'TAKAS',
     'hammer': 'TOKMAK',
     'watchAd': 'REKLAM',
-  'swapBonus': 'Swap Bonusu',
+  'swapBonus': 'Reklam İzle',
+    'duplicate': 'Çoğalt',
   'swapPlus': '+1 SWAP',
   'noSwaps': 'Swap hakkın yok',
     'shop': 'MAĞAZA',
@@ -175,24 +172,31 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   // ===== Game logic =====
 
   void _resetBoard({required bool hard}) {
-    grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
-    _initFirstBoard();
-    _clearPath();
     if (hard) {
       score = BigInt.zero;
       levelIdx = 1;
       diamonds = 0;
       swaps = 0;
     }
+    grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
+    _initFirstBoard();
+    _clearPath();
     _recalcBest();
     setState(() {});
   }
 
+  List<BigInt> _spawnPoolForLevel(int level) {
+    final int minPow = max(1, level); // Level 1 => 2^1 = 2
+    return List<BigInt>.generate(5, (i) => BigInt.one << (minPow + i));
+  }
 
 void _initFirstBoard() {
-  // Initial board distribution:
-  // Use the same weighted spawn pool as the current level, but ensure the first
-  // four spawnable values appear at least once to avoid 2/4-heavy starts.
+  // Initial board uses the same spawn pool as the current level:
+  // Level 1 => 2,4,8,16,32
+  // Level 2 => 4,8,16,32,64
+  // Level 3 => 8,16,32,64,128 ... (equal probability)
+  final pool = _spawnPoolForLevel(levelIdx);
+
   final all = <Pos>[];
   for (int r = 0; r < rows; r++) {
     for (int c = 0; c < cols; c++) {
@@ -201,56 +205,30 @@ void _initFirstBoard() {
   }
   all.shuffle(_rng);
 
+  BigInt pick() => pool[_rng.nextInt(pool.length)];
+
+  // Fill all cells
   for (final p in all) {
-    grid[p.r][p.c] = _spawnTile();
+    grid[p.r][p.c] = pick();
   }
 
-  final minPow = _minPowForSpawn();
-  for (int i = 0; i < 4 && i < all.length; i++) {
-    grid[all[i].r][all[i].c] = BigInt.one << (minPow + i);
+  // Ensure at least one of each pool value (if board has enough cells)
+  for (int i = 0; i < pool.length && i < all.length; i++) {
+    final p = all[i];
+    grid[p.r][p.c] = pool[i];
   }
-}
-
-int _minPowForSpawn() {
-  // Spawn pool shifts up when the board reaches big milestones.
-  // We keep a 6-value pool: [minPow .. minPow+5].
-  final m = _maxOnBoard();
-  final int maxPowReached = m <= BigInt.zero ? 1 : (m.bitLength - 1);
-
-  int minPow = 1; // 2
-  if (maxPowReached >= 11) {
-    // Reached at least 2048 (2^11)
-    // 2048 -> 4, 4096 -> 8, 8192 -> 16, ...
-    minPow = max(2, maxPowReached - 9);
-  }
-  return minPow;
 }
 
 BigInt _spawnTile() {
-  // Spawn distribution per level:
-  // - First 4 values in the spawn pool are balanced.
-  // - 5th and 6th values are rarer.
-  final minPow = _minPowForSpawn();
-  final roll = _rng.nextDouble();
-
-  int offset;
-  if (roll < 0.22) {
-    offset = 0;
-  } else if (roll < 0.44) {
-    offset = 1;
-  } else if (roll < 0.66) {
-    offset = 2;
-  } else if (roll < 0.88) {
-    offset = 3;
-  } else if (roll < 0.94) {
-    offset = 4;
-  } else {
-    offset = 5;
-  }
-
-  final pow = (minPow + offset).clamp(minPow, minPow + 5);
-  return BigInt.one << pow;
+  // Spawn rules (requested):
+  // Each level spawns the lowest 5 values for that level with equal probability.
+  // Level 1 => 2,4,8,16,32
+  // Level 2 => 4,8,16,32,64
+  // Level 3 => 8,16,32,64,128 ...
+  final pool = _spawnPoolForLevel(levelIdx);
+  return pool[_rng.nextInt(pool.length)];
 }
+
 
   BigInt _goalForLevel(int level) {
     // Level 1 target = 2048, Level 2 = 4096, Level 3 = 8192 ...
@@ -290,37 +268,6 @@ BigInt _spawnTile() {
   }
 
 
-void _handlePanUpdate(Offset local, double cellSize, double gap) {
-  final prev = _lastPanLocal;
-  _lastPanLocal = local;
-
-  if (prev == null) {
-    final p = _hitTestPos(local, cellSize, gap);
-    if (p != null) _onCellEnter(p);
-    return;
-  }
-
-  final delta = local - prev;
-  final dist = delta.distance;
-  if (dist <= 0.1) {
-    final p = _hitTestPos(local, cellSize, gap);
-    if (p != null) _onCellEnter(p);
-    return;
-  }
-
-  final step = max(6.0, (cellSize + gap) / 3);
-  final n = (dist / step).ceil().clamp(1, 40);
-
-  for (int i = 1; i <= n; i++) {
-    final t = i / n;
-    final pt = Offset(prev.dx + delta.dx * t, prev.dy + delta.dy * t);
-    final p = _hitTestPos(pt, cellSize, gap);
-    if (p != null) _onCellEnter(p);
-  }
-}
-
-
-
 void _clearPath() {
   _path.clear();
   _pathColors.clear();
@@ -357,12 +304,12 @@ void _onCellDown(Pos p) {
   if (v == null) return;
 
   // Tool modes take priority
-  if (swapMode) {
-    _handleSwapTap(p);
-    return;
-  }
   if (duplicateMode) {
     _handleDuplicateTap(p);
+    return;
+  }
+  if (swapMode) {
+    _handleSwapTap(p);
     return;
   }
   if (hammerMode) {
@@ -427,17 +374,12 @@ void _onCellEnter(Pos p) {
   final v = _valueAt(p);
   if (v == null) return;
 
-  // Rule set:
-  // - First extension must match the start value (2-2-...)
-  // - After that: same or double of the previous pick.
+  // Old-version rule:
+  // Next pick must be same or double of the previous pick (no base-pair arming).
   final lv = _lastValue ?? _valueAt(last);
   if (lv == null) return;
 
-  final bool ok = (_path.length == 1)
-      ? (v == _baseValue)
-      : (v == lv || v == (lv << 1));
-
-  if (ok) {
+  if (v == lv || v == (lv << 1)) {
     _path.add(p);
     _pathColors.add(_chainColorForIndex(_path.length - 1));
     _lastValue = v;
@@ -722,41 +664,6 @@ void _collapseAndFill() {
     setState(() {});
   }
 
-void _handleDuplicateTap(Pos p) {
-  final v = grid[p.r][p.c];
-  if (v == null) return;
-
-  if (_dupSource == null) {
-    _dupSource = p;
-    _showToast('1/2');
-    setState(() {});
-    return;
-  }
-  if (_dupSource == p) {
-    _dupSource = null;
-    setState(() {});
-    return;
-  }
-
-  final src = _dupSource!;
-  final sv = grid[src.r][src.c];
-  if (sv == null) {
-    _dupSource = null;
-    duplicateMode = false;
-    setState(() {});
-    return;
-  }
-
-  // Overwrite target tile with the source value (one-time use).
-  grid[p.r][p.c] = sv;
-
-  duplicateMode = false;
-  _dupSource = null;
-  _showToast(t('duplicate'));
-  setState(() {});
-}
-
-
   void _handleHammerTap(Pos p) {
     if (grid[p.r][p.c] == null) return;
     grid[p.r][p.c] = null;
@@ -766,47 +673,26 @@ void _handleDuplicateTap(Pos p) {
     setState(() {});
   }
 
-void _toggleSwap() {
-  if (!swapMode) {
-    if (diamonds < 10) {
-      _showToast(t('notEnoughDiamonds'));
-      return;
+  void _toggleSwap() {
+    if (!swapMode) {
+      if (diamonds < 10) {
+        _showToast(t('notEnoughDiamonds'));
+        return;
+      }
+      diamonds -= 10;
+      swapMode = true;
+      hammerMode = false;
+      duplicateMode = false;
+      _swapFirst = null;
+      _showToast('-10 💎');
+    } else {
+      swapMode = false;
+      _swapFirst = null;
     }
-    diamonds -= 10;
-    swapMode = true;
-    hammerMode = false;
-    duplicateMode = false;
-    _swapFirst = null;
-    _dupSource = null;
-    _showToast('-10 💎');
-  } else {
-    swapMode = false;
-    _swapFirst = null;
+    setState(() {});
   }
-  setState(() {});
-}
 
-void _toggleDuplicate() {
-  if (!duplicateMode) {
-    if (diamonds < 25) {
-      _showToast(t('notEnoughDiamonds'));
-      return;
-    }
-    diamonds -= 25;
-    duplicateMode = true;
-    swapMode = false;
-    hammerMode = false;
-    _dupSource = null;
-    _swapFirst = null;
-    _showToast('-25 💎');
-  } else {
-    duplicateMode = false;
-    _dupSource = null;
-  }
-  setState(() {});
-}
-
-void _toggleHammer() {
+  void _toggleHammer() {
     if (!hammerMode) {
       if (diamonds < 7) {
         _showToast(t('notEnoughDiamonds'));
@@ -815,9 +701,7 @@ void _toggleHammer() {
       diamonds -= 7;
       hammerMode = true;
       swapMode = false;
-      duplicateMode = false;
       _swapFirst = null;
-      _dupSource = null;
       _showToast('-7 💎');
     } else {
       hammerMode = false;
@@ -825,8 +709,38 @@ void _toggleHammer() {
     setState(() {});
   }
 
+
+void _toggleDuplicate() {
+  if (!duplicateMode) {
+    if (diamonds < 20) {
+      _showToast(t('notEnoughDiamonds'));
+      return;
+    }
+    diamonds -= 20;
+    duplicateMode = true;
+    // Disable other tools
+    swapMode = false;
+    hammerMode = false;
+    _swapFirst = null;
+    _showToast('-20 💎');
+  } else {
+    duplicateMode = false;
+  }
+  setState(() {});
+}
+
+void _handleDuplicateTap(Pos p) {
+  final v = grid[p.r][p.c];
+  if (v == null) return;
+  grid[p.r][p.c] = v << 1; // double the value
+  duplicateMode = false;
+  _spawnTick++; // trigger a subtle rebuild for tile
+  _showToast('×2');
+  setState(() {});
+}
+
   void _watchAdReward() {
-    // Simulated rewarded ad: grant 10 diamonds.
+    // Rewarded ad: +10 diamonds
     diamonds += 10;
     _showToast('+10 💎');
     setState(() {});
@@ -1109,21 +1023,15 @@ void _toggleHammer() {
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onPanStart: (d) {
-  _lastPanLocal = d.localPosition;
-  final p = _hitTestPos(d.localPosition, cellSize, gap);
-  if (p != null) _onCellDown(p);
-},
-onPanUpdate: (d) {
-  _handlePanUpdate(d.localPosition, cellSize, gap);
-},
-              onPanEnd: (_) {
-                _lastPanLocal = null;
-                _onCellUp();
+                final p = _hitTestPos(d.localPosition, cellSize, gap);
+                if (p != null) _onCellDown(p);
               },
-              onPanCancel: () {
-                _lastPanLocal = null;
-                _onCellUp();
+              onPanUpdate: (d) {
+                final p = _hitTestPos(d.localPosition, cellSize, gap);
+                if (p != null) _onCellEnter(p);
               },
+              onPanEnd: (_) => _onCellUp(),
+              onPanCancel: _onCellUp,
               onTapDown: (d) {
                 final p = _hitTestPos(d.localPosition, cellSize, gap);
                 if (p != null) _onCellDown(p);
@@ -1200,7 +1108,8 @@ if (_path.length >= 2)
   final top = _lighten(baseColor, 0.08);
   final bottom = _darken(baseColor, 0.16);
 
-  return TweenAnimationBuilder<double>(
+  return IgnorePointer(
+    child: TweenAnimationBuilder<double>(
       key: ValueKey('fall_${p.r}_${p.c}_${v?.toString() ?? "n"}_${_spawnTick}'),
       tween: Tween<double>(begin: beginDy, end: 0.0),
       duration: const Duration(milliseconds: 260),
@@ -1249,6 +1158,7 @@ if (_path.length >= 2)
                 ),
         ),
       ),
+    ),
   );
 }
 
@@ -1261,58 +1171,58 @@ if (_path.length >= 2)
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 20, offset: const Offset(0, -10))],
       ),
       child: Row(
-          children: [
-    Expanded(
-      child: _actionButton(
-        icon: swapMode ? Icons.close : Icons.swap_horiz,
-        label: t('swap'),
-        sub: '10 💎',
-        active: swapMode,
-        onTap: _toggleSwap,
+        children: [
+          Expanded(
+            child: _actionButton(
+              icon: swapMode ? Icons.close : Icons.swap_horiz,
+              label: t('swap'),
+              sub: '10 💎',
+              active: swapMode,
+              onTap: _toggleSwap,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _actionButton(
+              icon: hammerMode ? Icons.close : Icons.gavel,
+              label: t('hammer'),
+              sub: '7 💎',
+              active: hammerMode,
+              onTap: _toggleHammer,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _actionButton(
+              icon: Icons.smart_display,
+              label: t('swapBonus'),
+              sub: '+10 💎',
+              active: false,
+              onTap: _watchAdReward,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _actionButton(
+              icon: Icons.shopping_cart,
+              label: t('shop'),
+              sub: '',
+              active: false,
+              onTap: _openShopSheet,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _actionButton(
+              icon: duplicateMode ? Icons.close : Icons.copy,
+              label: t('duplicate'),
+              sub: '20 💎',
+              active: duplicateMode,
+              onTap: _toggleDuplicate,
+            ),
+          ),
+        ],
       ),
-    ),
-    const SizedBox(width: 10),
-    Expanded(
-      child: _actionButton(
-        icon: hammerMode ? Icons.close : Icons.gavel,
-        label: t('hammer'),
-        sub: '7 💎',
-        active: hammerMode,
-        onTap: _toggleHammer,
-      ),
-    ),
-    const SizedBox(width: 10),
-    Expanded(
-      child: _actionButton(
-        icon: Icons.smart_display,
-        label: t('swapBonus'),
-        sub: '+10 💎',
-        active: false,
-        onTap: _watchAdReward,
-      ),
-    ),
-    const SizedBox(width: 10),
-    Expanded(
-      child: _actionButton(
-        icon: duplicateMode ? Icons.close : Icons.copy,
-        label: t('duplicate'),
-        sub: '25 💎',
-        active: duplicateMode,
-        onTap: _toggleDuplicate,
-      ),
-    ),
-    const SizedBox(width: 10),
-    Expanded(
-      child: _actionButton(
-        icon: Icons.shopping_cart,
-        label: t('shop'),
-        sub: '',
-        active: false,
-        onTap: _openShopSheet,
-      ),
-    ),
-  ],
-),
     );
   }
 
