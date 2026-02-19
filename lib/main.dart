@@ -37,11 +37,8 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   // ===== Board config =====
   static const int cols = 5;
   static const int rows = 7;
-  // Smaller gaps increase effective playable area without changing the overall visual style.
-  static const double kGap = 2.0;
-
-  // Standard banner height (AdMob standard banner is 50dp in portrait).
-  static const double kBannerHeight = 50.0; // fixed banner height (Phase 1)
+  static const double kGap = 10.0;
+  static const double kBannerHeight = 60.0; // fixed banner height (Phase 1)
 
   final Random _rng = Random();
 
@@ -278,19 +275,10 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   }
 
 
-  /// Maps a pointer position (within the board widget) to a cell index.
-  ///
-  /// Important for playability: the hitbox intentionally includes the "gap" area
-  /// so drag selection doesn't break while crossing between tiles.
   Pos? _hitTestPos(Offset local, double cellSize, double gap) {
-    if (local.dx < 0 || local.dy < 0) return null;
     final span = cellSize + gap;
-    final boardW = cols * cellSize + (cols - 1) * gap;
-    final boardH = rows * cellSize + (rows - 1) * gap;
-    if (local.dx > boardW || local.dy > boardH) return null;
-
-    final c = (local.dx / span).floor();
-    final r = (local.dy / span).floor();
+    int c = ((local.dx + gap / 2) / span).floor();
+    int r = ((local.dy + gap / 2) / span).floor();
     if (r < 0 || r >= rows || c < 0 || c >= cols) return null;
     return Pos(r, c);
   }
@@ -397,6 +385,13 @@ void _onCellEnter(Pos p) {
 
   final v = _valueAt(p);
   if (v == null) return;
+
+  // Rule: the chain must start with an equal-value pair.
+  // i.e. the first extension (2nd picked tile) must equal the starting tile.
+  if (_path.length == 1) {
+    final base = _valueAt(_path.first);
+    if (base == null || v != base) return;
+  }
 
   // Old-version rule:
   // Next pick must be same or double of the previous pick (no base-pair arming).
@@ -862,25 +857,23 @@ void _collapseAndFill() {
   Widget _buildBannerAdPlaceholder() {
     // Phase 1: fixed-size banner slot to prevent board overlap.
     // Replace this Container with real AdMob Banner widget when integrating ads.
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      child: SizedBox(
-        height: kBannerHeight,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.06),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.white.withOpacity(0.10)),
-          ),
-          child: Center(
-            child: Text(
-              'BANNER AD',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.65),
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.1,
-              ),
+    return SizedBox(
+      height: kBannerHeight,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withOpacity(0.10)),
+        ),
+        child: Center(
+          child: Text(
+            'BANNER AD',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.65),
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.1,
             ),
           ),
         ),
@@ -895,7 +888,7 @@ void _collapseAndFill() {
     required double ratio,
   }) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
       child: Column(
         children: [
           Row(
@@ -913,7 +906,7 @@ void _collapseAndFill() {
                 ),
               ),
               const Spacer(),
-              Text(_fmtBig(score), style: _neon(30, opacity: 0.98)),
+              Text(_fmtBig(score), style: _neon(34, opacity: 0.98)),
               const Spacer(),
               _pill(
                 child: Row(
@@ -929,7 +922,7 @@ void _collapseAndFill() {
               _tinyButton(icon: Icons.settings, onTap: _openSettingsSheet),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(child: _miniStatChip(t('now'), nowLabel)),
@@ -939,12 +932,12 @@ void _collapseAndFill() {
               Expanded(child: _miniStatChip(t('next'), goalLabel)),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           ClipRRect(
             borderRadius: BorderRadius.circular(999),
             child: LinearProgressIndicator(
               value: ratio,
-              minHeight: 8,
+              minHeight: 10,
               backgroundColor: Colors.white.withOpacity(0.10),
               valueColor: AlwaysStoppedAnimation<Color>(Colors.white.withOpacity(0.75)),
             ),
@@ -956,7 +949,7 @@ void _collapseAndFill() {
 
   Widget _pill({required Widget child}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.08),
         borderRadius: BorderRadius.circular(16),
@@ -971,21 +964,21 @@ void _collapseAndFill() {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 36,
-        height: 30,
+        width: 40,
+        height: 34,
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.10),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: Colors.white.withOpacity(0.16)),
         ),
-        child: Icon(icon, size: 17, color: Colors.white.withOpacity(0.92)),
+        child: Icon(icon, size: 18, color: Colors.white.withOpacity(0.92)),
       ),
     );
   }
 
   Widget _miniStatChip(String label, String value) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.06),
         borderRadius: BorderRadius.circular(18),
@@ -993,9 +986,9 @@ void _collapseAndFill() {
       ),
       child: Column(
         children: [
-          Text(label, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 11, fontWeight: FontWeight.w800)),
+          Text(label, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12, fontWeight: FontWeight.w800)),
           const SizedBox(height: 4),
-          Text(value, style: _neon(13, opacity: 0.95)),
+          Text(value, style: _neon(14, opacity: 0.95)),
         ],
       ),
     );
@@ -1004,17 +997,10 @@ void _collapseAndFill() {
   Widget _buildBoard() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Fit by BOTH width and height to maximize the playable board area.
-        // This is critical after compacting header/footer.
+        final boardW = min(constraints.maxWidth, 430.0) * 0.96;
         final gap = kGap;
-        final availW = max(0.0, constraints.maxWidth - 24);
-        final availH = max(0.0, constraints.maxHeight - 8);
-
-        final cellByW = (availW - (cols - 1) * gap) / cols;
-        final cellByH = (availH - (rows - 1) * gap) / rows;
-        final cellSize = max(0.0, min(cellByW, cellByH));
-
-        final boardW = cols * cellSize + (cols - 1) * gap;
+        final cellSizeBase = (boardW - (cols - 1) * gap) / cols;
+        final cellSize = cellSizeBase * 0.87;
         final boardH = rows * cellSize + (rows - 1) * gap;
 
         return Center(
@@ -1109,11 +1095,10 @@ if (_path.length >= 2)
   final top = _lighten(baseColor, 0.08);
   final bottom = _darken(baseColor, 0.16);
 
-  return Listener(
-    onPointerDown: (_) => _onCellDown(p),
-    onPointerMove: (_) => _onCellEnter(p),
-    onPointerUp: (_) => _onCellUp(),
-    child: TweenAnimationBuilder<double>(
+  // Pointer handling is done at the board level (GestureDetector) for stable
+  // drag-selection across cells. Per-cell pointer listeners can cause the chain
+  // to stop after the first link on some devices.
+  return TweenAnimationBuilder<double>(
       key: ValueKey('fall_${p.r}_${p.c}_${v?.toString() ?? "n"}_${_spawnTick}'),
       tween: Tween<double>(begin: beginDy, end: 0.0),
       duration: const Duration(milliseconds: 260),
@@ -1162,14 +1147,13 @@ if (_path.length >= 2)
                 ),
         ),
       ),
-    ),
-  );
+    );
 }
 
 
   Widget _buildBottomBar() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
       decoration: BoxDecoration(
         color: const Color(0xFF06102C),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 20, offset: const Offset(0, -10))],
@@ -1185,7 +1169,7 @@ if (_path.length >= 2)
               onTap: _toggleSwap,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: _actionButton(
               icon: hammerMode ? Icons.close : Icons.gavel,
@@ -1195,7 +1179,7 @@ if (_path.length >= 2)
               onTap: _toggleHammer,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: _actionButton(
               icon: Icons.smart_display,
@@ -1205,7 +1189,7 @@ if (_path.length >= 2)
               onTap: _watchAdReward,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: _actionButton(
               icon: Icons.shopping_cart,
@@ -1215,7 +1199,7 @@ if (_path.length >= 2)
               onTap: _openShopSheet,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: _actionButton(
               icon: Icons.pause,
@@ -1241,7 +1225,7 @@ if (_path.length >= 2)
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
           gradient: LinearGradient(
@@ -1257,12 +1241,12 @@ if (_path.length >= 2)
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 20, color: Colors.white.withOpacity(0.95)),
-            const SizedBox(height: 5),
-            Text(label, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 10, fontWeight: FontWeight.w900)),
+            Icon(icon, size: 22, color: Colors.white.withOpacity(0.95)),
+            const SizedBox(height: 6),
+            Text(label, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 11, fontWeight: FontWeight.w900)),
             if (sub.isNotEmpty) ...[
               const SizedBox(height: 2),
-              Text(sub, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 9, fontWeight: FontWeight.w800)),
+              Text(sub, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 10, fontWeight: FontWeight.w800)),
             ],
           ],
         ),
@@ -1400,7 +1384,7 @@ if (_path.length >= 2)
       child: Row(
         children: [
           Expanded(child: Text(title, style: _neon(13, opacity: 0.9))),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           child,
         ],
       ),
