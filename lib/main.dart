@@ -989,7 +989,7 @@ void _handleDuplicateTap(Pos p) {
     return SizedBox(
       height: kBannerHeight,
       child: Container(
-        margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+        margin: const EdgeInsets.fromLTRB(14, 0, 14, 6),
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.06),
           borderRadius: BorderRadius.circular(14),
@@ -1299,7 +1299,7 @@ Widget _buildBoard() {
 
   Widget _buildBottomBar() {
   return Container(
-    padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+    padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
     decoration: BoxDecoration(
       color: const Color(0xFF06102C),
       boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 20, offset: const Offset(0, -10))],
@@ -1315,7 +1315,7 @@ Widget _buildBoard() {
             onTap: _toggleSwap,
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 6),
         Expanded(
           child: _actionButton(
             icon: hammerMode ? Icons.close : Icons.gavel,
@@ -1325,7 +1325,7 @@ Widget _buildBoard() {
             onTap: _toggleHammer,
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 6),
         Expanded(
           child: _actionButton(
             icon: Icons.smart_display,
@@ -1335,7 +1335,7 @@ Widget _buildBoard() {
             onTap: _watchAdReward,
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 6),
         Expanded(
           child: _actionButton(
             icon: duplicateMode ? Icons.close : Icons.copy,
@@ -1345,7 +1345,7 @@ Widget _buildBoard() {
             onTap: _toggleDuplicate,
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 6),
         Expanded(
           child: _actionButton(
             icon: Icons.shopping_cart,
@@ -1371,7 +1371,7 @@ Widget _buildBoard() {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
           gradient: LinearGradient(
@@ -1387,11 +1387,11 @@ Widget _buildBoard() {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 22, color: Colors.white.withOpacity(0.95)),
-            const SizedBox(height: 6),
+            Icon(icon, size: 20, color: Colors.white.withOpacity(0.95)),
+            const SizedBox(height: 4),
             Text(label, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 11, fontWeight: FontWeight.w900)),
             if (sub.isNotEmpty) ...[
-              const SizedBox(height: 2),
+              const SizedBox(height: 1),
               Text(sub, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 10, fontWeight: FontWeight.w800)),
             ],
           ],
