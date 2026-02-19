@@ -40,20 +40,6 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   static const double kGap = 10.0;
   static const double kBannerHeight = 60.0; // fixed banner height (Phase 1)
 
-  // UI scaling: shrink top/bottom regions to free board space (auto-compact on small screens).
-  static const double _uiBaseScale = 0.90;
-
-  double _uiScale(BuildContext context) {
-    final h = MediaQuery.of(context).size.height;
-    // Aggressive compacting for small screens.
-    if (h < 720) return 0.85;
-    return _uiBaseScale;
-  }
-  // UI scale used to slightly compact header/bottom areas on small screens.
-  double get uiScale => _uiScale(context);
-
-
-
   final Random _rng = Random();
 
   late List<List<BigInt?>> grid;
@@ -66,7 +52,12 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
 
   bool swapMode = false;
   bool hammerMode = false;
+  bool duplicateMode = false;
   Pos? _swapFirst;
+  Pos? _dupSource;
+
+  // Board-level drag sampling to avoid missing cells on fast drags.
+  Offset? _lastPanLocal;
 
   final List<Pos> _path = [];
   final List<Color> _pathColors = <Color>[]; // per-segment chain line colors
@@ -102,7 +93,8 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'swap': 'SWAP',
     'hammer': 'HAMMER',
     'watchAd': 'AD',
-  'swapBonus': 'SWAP Bonus',
+  'swapBonus': 'WATCH AD',
+    'duplicate': 'DUPLICATE',
   'swapPlus': '+1 SWAP',
   'noSwaps': 'No swaps left',
     'shop': 'SHOP',
@@ -123,7 +115,8 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     'swap': 'TAUSCH',
     'hammer': 'HAMMER',
     'watchAd': 'WERBUNG',
-  'swapBonus': 'SWAP Bonus',
+  'swapBonus': 'WATCH AD',
+    'duplicate': 'DUPLICATE',
   'swapPlus': '+1 SWAP',
   'noSwaps': 'Keine Swaps übrig',
     'shop': 'SHOP',
@@ -195,70 +188,69 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     setState(() {});
   }
 
-  void _initFirstBoard() {
-    // Initial board distribution (only for first open):
-    // values {2,4,8,16,32} with balanced weights (base 4).
-    final all = <Pos>[];
-    for (int r = 0; r < rows; r++) {
-      for (int c = 0; c < cols; c++) {
-        all.add(Pos(r, c));
-      }
-    }
-    all.shuffle(_rng);
 
-    BigInt pick() {
-      final roll = _rng.nextDouble();
-      if (roll < 0.10) return BigInt.from(2);
-      if (roll < 0.50) return BigInt.from(4);
-      if (roll < 0.75) return BigInt.from(8);
-      if (roll < 0.90) return BigInt.from(16);
-      return BigInt.from(32);
-    }
-
-    // Fill all cells
-    for (final p in all) {
-      grid[p.r][p.c] = pick();
-    }
-
-    // Ensure at least one of each (2,4,8,16,32)
-    const ensure = [2, 4, 8, 16, 32];
-    for (int i = 0; i < ensure.length && i < all.length; i++) {
-      final p = all[i];
-      grid[p.r][p.c] = BigInt.from(ensure[i]);
+void _initFirstBoard() {
+  // Initial board distribution:
+  // Use the same weighted spawn pool as the current level, but ensure the first
+  // four spawnable values appear at least once to avoid 2/4-heavy starts.
+  final all = <Pos>[];
+  for (int r = 0; r < rows; r++) {
+    for (int c = 0; c < cols; c++) {
+      all.add(Pos(r, c));
     }
   }
+  all.shuffle(_rng);
 
-  BigInt _spawnTile() {
-    // Smart spawn rules:
-    // - Until 2048 is reached: max spawn = 64
-    // - When 2048 is reached: remove 2, max spawn = 128
-    // - When 4096 is reached: remove 4, min becomes 8, max spawn = 256
-    // - Continues similarly: each milestone removes the smallest spawn and increases max.
-    final m = _maxOnBoard();
-    final int maxPowReached = m <= BigInt.zero ? 1 : (m.bitLength - 1);
-
-    int minPow = 1; // 2
-    if (maxPowReached >= 11) {
-      // Reached at least 2048 (2^11)
-      minPow = max(2, maxPowReached - 9); // 2048->4, 4096->8, 8192->16 ...
-    }
-    final int maxPow = minPow + 5; // keep pool width stable
-
-    // Weighted selection favouring smaller values.
-    final roll = _rng.nextDouble();
-    int pow;
-    if (roll < 0.70) {
-      pow = minPow;
-    } else if (roll < 0.92) {
-      pow = minPow + 1;
-    } else if (roll < 0.985) {
-      pow = minPow + 2;
-    } else {
-      pow = minPow + 3;
-    }
-    pow = pow.clamp(minPow, maxPow);
-    return BigInt.one << pow;
+  for (final p in all) {
+    grid[p.r][p.c] = _spawnTile();
   }
+
+  final minPow = _minPowForSpawn();
+  for (int i = 0; i < 4 && i < all.length; i++) {
+    grid[all[i].r][all[i].c] = BigInt.one << (minPow + i);
+  }
+}
+
+int _minPowForSpawn() {
+  // Spawn pool shifts up when the board reaches big milestones.
+  // We keep a 6-value pool: [minPow .. minPow+5].
+  final m = _maxOnBoard();
+  final int maxPowReached = m <= BigInt.zero ? 1 : (m.bitLength - 1);
+
+  int minPow = 1; // 2
+  if (maxPowReached >= 11) {
+    // Reached at least 2048 (2^11)
+    // 2048 -> 4, 4096 -> 8, 8192 -> 16, ...
+    minPow = max(2, maxPowReached - 9);
+  }
+  return minPow;
+}
+
+BigInt _spawnTile() {
+  // Spawn distribution per level:
+  // - First 4 values in the spawn pool are balanced.
+  // - 5th and 6th values are rarer.
+  final minPow = _minPowForSpawn();
+  final roll = _rng.nextDouble();
+
+  int offset;
+  if (roll < 0.22) {
+    offset = 0;
+  } else if (roll < 0.44) {
+    offset = 1;
+  } else if (roll < 0.66) {
+    offset = 2;
+  } else if (roll < 0.88) {
+    offset = 3;
+  } else if (roll < 0.94) {
+    offset = 4;
+  } else {
+    offset = 5;
+  }
+
+  final pow = (minPow + offset).clamp(minPow, minPow + 5);
+  return BigInt.one << pow;
+}
 
   BigInt _goalForLevel(int level) {
     // Level 1 target = 2048, Level 2 = 4096, Level 3 = 8192 ...
@@ -296,6 +288,37 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
     if (r < 0 || r >= rows || c < 0 || c >= cols) return null;
     return Pos(r, c);
   }
+
+
+void _handlePanUpdate(Offset local, double cellSize, double gap) {
+  final prev = _lastPanLocal;
+  _lastPanLocal = local;
+
+  if (prev == null) {
+    final p = _hitTestPos(local, cellSize, gap);
+    if (p != null) _onCellEnter(p);
+    return;
+  }
+
+  final delta = local - prev;
+  final dist = delta.distance;
+  if (dist <= 0.1) {
+    final p = _hitTestPos(local, cellSize, gap);
+    if (p != null) _onCellEnter(p);
+    return;
+  }
+
+  final step = max(6.0, (cellSize + gap) / 3);
+  final n = (dist / step).ceil().clamp(1, 40);
+
+  for (int i = 1; i <= n; i++) {
+    final t = i / n;
+    final pt = Offset(prev.dx + delta.dx * t, prev.dy + delta.dy * t);
+    final p = _hitTestPos(pt, cellSize, gap);
+    if (p != null) _onCellEnter(p);
+  }
+}
+
 
 
 void _clearPath() {
@@ -336,6 +359,10 @@ void _onCellDown(Pos p) {
   // Tool modes take priority
   if (swapMode) {
     _handleSwapTap(p);
+    return;
+  }
+  if (duplicateMode) {
+    _handleDuplicateTap(p);
     return;
   }
   if (hammerMode) {
@@ -400,12 +427,17 @@ void _onCellEnter(Pos p) {
   final v = _valueAt(p);
   if (v == null) return;
 
-  // Old-version rule:
-  // Next pick must be same or double of the previous pick (no base-pair arming).
+  // Rule set:
+  // - First extension must match the start value (2-2-...)
+  // - After that: same or double of the previous pick.
   final lv = _lastValue ?? _valueAt(last);
   if (lv == null) return;
 
-  if (v == lv || v == (lv << 1)) {
+  final bool ok = (_path.length == 1)
+      ? (v == _baseValue)
+      : (v == lv || v == (lv << 1));
+
+  if (ok) {
     _path.add(p);
     _pathColors.add(_chainColorForIndex(_path.length - 1));
     _lastValue = v;
@@ -684,12 +716,46 @@ void _collapseAndFill() {
     grid[a.r][a.c] = grid[p.r][p.c];
     grid[p.r][p.c] = tmp;
 
-    if (swaps > 0) swaps -= 1;
     swapMode = false;
     _swapFirst = null;
     _showToast(t('swap'));
     setState(() {});
   }
+
+void _handleDuplicateTap(Pos p) {
+  final v = grid[p.r][p.c];
+  if (v == null) return;
+
+  if (_dupSource == null) {
+    _dupSource = p;
+    _showToast('1/2');
+    setState(() {});
+    return;
+  }
+  if (_dupSource == p) {
+    _dupSource = null;
+    setState(() {});
+    return;
+  }
+
+  final src = _dupSource!;
+  final sv = grid[src.r][src.c];
+  if (sv == null) {
+    _dupSource = null;
+    duplicateMode = false;
+    setState(() {});
+    return;
+  }
+
+  // Overwrite target tile with the source value (one-time use).
+  grid[p.r][p.c] = sv;
+
+  duplicateMode = false;
+  _dupSource = null;
+  _showToast(t('duplicate'));
+  setState(() {});
+}
+
 
   void _handleHammerTap(Pos p) {
     if (grid[p.r][p.c] == null) return;
@@ -700,24 +766,47 @@ void _collapseAndFill() {
     setState(() {});
   }
 
-  void _toggleSwap() {
-    if (!swapMode) {
-      if (swaps <= 0) {
-        _showToast(t('noSwaps'));
-        return;
-      }
-      swapMode = true;
-      hammerMode = false;
-      _swapFirst = null;
-      _showToast('${t('swap')} (1)');
-    } else {
-      swapMode = false;
-      _swapFirst = null;
+void _toggleSwap() {
+  if (!swapMode) {
+    if (diamonds < 10) {
+      _showToast(t('notEnoughDiamonds'));
+      return;
     }
-    setState(() {});
+    diamonds -= 10;
+    swapMode = true;
+    hammerMode = false;
+    duplicateMode = false;
+    _swapFirst = null;
+    _dupSource = null;
+    _showToast('-10 💎');
+  } else {
+    swapMode = false;
+    _swapFirst = null;
   }
+  setState(() {});
+}
 
-  void _toggleHammer() {
+void _toggleDuplicate() {
+  if (!duplicateMode) {
+    if (diamonds < 25) {
+      _showToast(t('notEnoughDiamonds'));
+      return;
+    }
+    diamonds -= 25;
+    duplicateMode = true;
+    swapMode = false;
+    hammerMode = false;
+    _dupSource = null;
+    _swapFirst = null;
+    _showToast('-25 💎');
+  } else {
+    duplicateMode = false;
+    _dupSource = null;
+  }
+  setState(() {});
+}
+
+void _toggleHammer() {
     if (!hammerMode) {
       if (diamonds < 7) {
         _showToast(t('notEnoughDiamonds'));
@@ -726,7 +815,9 @@ void _collapseAndFill() {
       diamonds -= 7;
       hammerMode = true;
       swapMode = false;
+      duplicateMode = false;
       _swapFirst = null;
+      _dupSource = null;
       _showToast('-7 💎');
     } else {
       hammerMode = false;
@@ -735,8 +826,9 @@ void _collapseAndFill() {
   }
 
   void _watchAdReward() {
-    swaps += 1;
-    _showToast(t('swapPlus'));
+    // Simulated rewarded ad: grant 10 diamonds.
+    diamonds += 10;
+    _showToast('+10 💎');
     setState(() {});
   }
 
@@ -805,7 +897,6 @@ void _collapseAndFill() {
 
   @override
   Widget build(BuildContext context) {
-    final uiScale = _uiScale(context);
     final goal = _goalForLevel(levelIdx);
     final curMax = _maxOnBoard();
     final bestLocal = best;
@@ -822,10 +913,10 @@ void _collapseAndFill() {
           children: [
             Column(
               children: [
-                _buildHeader(nowLabel: nowLabel, maxLabel: maxLabel, goalLabel: goalLabel, ratio: ratio, uiScale: uiScale),
-                SizedBox(height: 10 * uiScale),
+                _buildHeader(nowLabel: nowLabel, maxLabel: maxLabel, goalLabel: goalLabel, ratio: ratio),
+                const SizedBox(height: 10),
                 Expanded(child: _buildBoard()),
-                SizedBox(height: 6 * uiScale),
+                const SizedBox(height: 6),
               ],
             ),
             if (_toast != null)
@@ -833,13 +924,13 @@ void _collapseAndFill() {
                 left: 0,
                 right: 0,
                 // Keep toast above action bar + banner.
-                bottom: 14 + (kBannerHeight * uiScale) + (112 * uiScale),
+                bottom: 14 + kBannerHeight + 112,
                 child: Center(
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     decoration: BoxDecoration(
                       color: Colors.black.withOpacity(0.55),
-                      borderRadius: BorderRadius.circular(16 * uiScale),
+                      borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: Colors.white.withOpacity(0.18)),
                     ),
                     child: Text(_toast!, style: _neon(14)),
@@ -854,24 +945,24 @@ void _collapseAndFill() {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _buildBottomBar(uiScale: uiScale),
-            _buildBannerAdPlaceholder(uiScale: uiScale),
+            _buildBottomBar(),
+            _buildBannerAdPlaceholder(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBannerAdPlaceholder({required double uiScale}) {
+  Widget _buildBannerAdPlaceholder() {
     // Phase 1: fixed-size banner slot to prevent board overlap.
     // Replace this Container with real AdMob Banner widget when integrating ads.
     return SizedBox(
-      height: kBannerHeight * uiScale,
+      height: kBannerHeight,
       child: Container(
-        margin: EdgeInsets.fromLTRB(14 * uiScale, 0, 14 * uiScale, 10 * uiScale),
+        margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(14 * uiScale),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(color: Colors.white.withOpacity(0.10)),
         ),
         child: Center(
@@ -879,7 +970,7 @@ void _collapseAndFill() {
             'BANNER AD',
             style: TextStyle(
               color: Colors.white.withOpacity(0.65),
-              fontSize: 12 * uiScale,
+              fontSize: 12,
               fontWeight: FontWeight.w900,
               letterSpacing: 1.1,
             ),
@@ -890,65 +981,62 @@ void _collapseAndFill() {
   }
 
   Widget _buildHeader({
-    required double uiScale,
     required String nowLabel,
     required String maxLabel,
     required String goalLabel,
     required double ratio,
   }) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(14 * uiScale, 10 * uiScale, 14 * uiScale, 6 * uiScale),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
       child: Column(
         children: [
           Row(
             children: [
               _pill(
-                uiScale: uiScale,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.diamond, size: 18 * uiScale, color: const Color(0xFFB388FF)),
-                    SizedBox(width: 6 * uiScale),
-                    Text('$diamonds', style: _neon(16 * uiScale)),
-                    SizedBox(width: 8 * uiScale),
-                    _tinyButton(icon: Icons.add, onTap: _openShopSheet, uiScale: uiScale),
+                    const Icon(Icons.diamond, size: 18, color: Color(0xFFB388FF)),
+                    const SizedBox(width: 6),
+                    Text('$diamonds', style: _neon(16)),
+                    const SizedBox(width: 8),
+                    _tinyButton(icon: Icons.add, onTap: _openShopSheet),
                   ],
                 ),
               ),
               const Spacer(),
-              Text(_fmtBig(score), style: _neon(34 * uiScale, opacity: 0.98)),
+              Text(_fmtBig(score), style: _neon(34, opacity: 0.98)),
               const Spacer(),
               _pill(
-                uiScale: uiScale,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.workspace_premium, size: 18 * uiScale, color: const Color(0xFFFFD54F)),
-                    SizedBox(width: 6 * uiScale),
-                    Text('Level $levelIdx', style: _neon(14 * uiScale)),
+                    const Icon(Icons.workspace_premium, size: 18, color: Color(0xFFFFD54F)),
+                    const SizedBox(width: 6),
+                    Text('Level $levelIdx', style: _neon(14)),
                   ],
                 ),
               ),
-              SizedBox(width: 10 * uiScale),
-              _tinyButton(icon: Icons.settings, onTap: _openSettingsSheet, uiScale: uiScale),
+              const SizedBox(width: 10),
+              _tinyButton(icon: Icons.settings, onTap: _openSettingsSheet),
             ],
           ),
-          SizedBox(height: 10 * uiScale),
+          const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(child: _miniStatChip(t('now'), nowLabel, uiScale: uiScale)),
-              SizedBox(width: 10 * uiScale),
-              Expanded(child: _miniStatChip(t('max'), maxLabel, uiScale: uiScale)),
-              SizedBox(width: 10 * uiScale),
-              Expanded(child: _miniStatChip(t('next'), goalLabel, uiScale: uiScale)),
+              Expanded(child: _miniStatChip(t('now'), nowLabel)),
+              const SizedBox(width: 10),
+              Expanded(child: _miniStatChip(t('max'), maxLabel)),
+              const SizedBox(width: 10),
+              Expanded(child: _miniStatChip(t('next'), goalLabel)),
             ],
           ),
-          SizedBox(height: 10 * uiScale),
+          const SizedBox(height: 10),
           ClipRRect(
             borderRadius: BorderRadius.circular(999),
             child: LinearProgressIndicator(
               value: ratio,
-              minHeight: 10 * uiScale,
+              minHeight: 10,
               backgroundColor: Colors.white.withOpacity(0.10),
               valueColor: AlwaysStoppedAnimation<Color>(Colors.white.withOpacity(0.75)),
             ),
@@ -958,12 +1046,12 @@ void _collapseAndFill() {
     );
   }
 
-  Widget _pill({required Widget child, double uiScale = 1.0}) {
+  Widget _pill({required Widget child}) {
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 12 * uiScale, vertical: 8 * uiScale),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(16 * uiScale),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.white.withOpacity(0.14)),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 16, offset: const Offset(0, 8))],
       ),
@@ -971,25 +1059,25 @@ void _collapseAndFill() {
     );
   }
 
-  Widget _tinyButton({required IconData icon, required VoidCallback onTap, double uiScale = 1.0}) {
+  Widget _tinyButton({required IconData icon, required VoidCallback onTap}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 40 * uiScale,
-        height: 34 * uiScale,
+        width: 40,
+        height: 34,
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.10),
-          borderRadius: BorderRadius.circular(14 * uiScale),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(color: Colors.white.withOpacity(0.16)),
         ),
-        child: Icon(icon, size: 18 * uiScale, color: Colors.white.withOpacity(0.92)),
+        child: Icon(icon, size: 18, color: Colors.white.withOpacity(0.92)),
       ),
     );
   }
 
-  Widget _miniStatChip(String label, String value, {double uiScale = 1.0}) {
+  Widget _miniStatChip(String label, String value) {
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 12 * uiScale, vertical: 10 * uiScale),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.06),
         borderRadius: BorderRadius.circular(18),
@@ -997,9 +1085,9 @@ void _collapseAndFill() {
       ),
       child: Column(
         children: [
-          Text(label, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12 * uiScale, fontWeight: FontWeight.w800)),
-          SizedBox(height: 4 * uiScale),
-          Text(value, style: _neon(14 * uiScale, opacity: 0.95)),
+          Text(label, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Text(value, style: _neon(14, opacity: 0.95)),
         ],
       ),
     );
@@ -1008,34 +1096,34 @@ void _collapseAndFill() {
   Widget _buildBoard() {
     return LayoutBuilder(
       builder: (context, constraints) {
+        final boardW = min(constraints.maxWidth, 430.0) * 0.96;
         final gap = kGap;
-        final maxW = constraints.maxWidth * 0.98;
-        final maxH = constraints.maxHeight * 0.98;
-
-        final cellSize = min(
-          (maxW - (cols - 1) * gap) / cols,
-          (maxH - (rows - 1) * gap) / rows,
-        );
-
-        final boardW = cols * cellSize + (cols - 1) * gap;
+        final cellSizeBase = (boardW - (cols - 1) * gap) / cols;
+        final cellSize = cellSizeBase * 0.87;
         final boardH = rows * cellSize + (rows - 1) * gap;
 
-return Center(
+        return Center(
           child: SizedBox(
             width: boardW,
             height: boardH,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onPanStart: (d) {
-                final p = _hitTestPos(d.localPosition, cellSize, gap);
-                if (p != null) _onCellDown(p);
+  _lastPanLocal = d.localPosition;
+  final p = _hitTestPos(d.localPosition, cellSize, gap);
+  if (p != null) _onCellDown(p);
+},
+onPanUpdate: (d) {
+  _handlePanUpdate(d.localPosition, cellSize, gap);
+},
+              onPanEnd: (_) {
+                _lastPanLocal = null;
+                _onCellUp();
               },
-              onPanUpdate: (d) {
-                final p = _hitTestPos(d.localPosition, cellSize, gap);
-                if (p != null) _onCellEnter(p);
+              onPanCancel: () {
+                _lastPanLocal = null;
+                _onCellUp();
               },
-              onPanEnd: (_) => _onCellUp(),
-              onPanCancel: _onCellUp,
               onTapDown: (d) {
                 final p = _hitTestPos(d.localPosition, cellSize, gap);
                 if (p != null) _onCellDown(p);
@@ -1112,11 +1200,7 @@ if (_path.length >= 2)
   final top = _lighten(baseColor, 0.08);
   final bottom = _darken(baseColor, 0.16);
 
-  return Listener(
-    onPointerDown: (_) => _onCellDown(p),
-    onPointerMove: (_) => _onCellEnter(p),
-    onPointerUp: (_) => _onCellUp(),
-    child: TweenAnimationBuilder<double>(
+  return TweenAnimationBuilder<double>(
       key: ValueKey('fall_${p.r}_${p.c}_${v?.toString() ?? "n"}_${_spawnTick}'),
       tween: Tween<double>(begin: beginDy, end: 0.0),
       duration: const Duration(milliseconds: 260),
@@ -1165,66 +1249,74 @@ if (_path.length >= 2)
                 ),
         ),
       ),
-    ),
   );
 }
 
 
-  Widget _buildBottomBar({required double uiScale}) {
+  Widget _buildBottomBar() {
     return Container(
-      padding: EdgeInsets.fromLTRB(14 * uiScale, 10 * uiScale, 14 * uiScale, 14 * uiScale),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
       decoration: BoxDecoration(
         color: const Color(0xFF06102C),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 20, offset: const Offset(0, -10))],
       ),
       child: Row(
-        children: [
-          Expanded(
-            child: _actionButton(uiScale: uiScale,
-              icon: swapMode ? Icons.close : Icons.swap_horiz,
-              label: t('swap'),
-              sub: '$swaps',
-              active: swapMode,
-              onTap: _toggleSwap,
-            ),
-          ),
-          SizedBox(width: 10 * uiScale),
-          Expanded(
-            child: _actionButton(uiScale: uiScale,
-              icon: hammerMode ? Icons.close : Icons.gavel,
-              label: t('hammer'),
-              sub: '7 💎',
-              active: hammerMode,
-              onTap: _toggleHammer,
-            ),
-          ),
-          SizedBox(width: 10 * uiScale),
-          Expanded(
-            child: _actionButton(uiScale: uiScale,
-              icon: Icons.smart_display,
-              label: t('swapBonus'),
-              sub: '+1',
-              active: false,
-              onTap: _watchAdReward,
-            ),
-          ),
-          SizedBox(width: 10 * uiScale),
-          Expanded(
-            child: _actionButton(uiScale: uiScale,
-              icon: Icons.shopping_cart,
-              label: t('shop'),
-              sub: '',
-              active: false,
-              onTap: _openShopSheet,
-            ),
-          ),
-],
+          children: [
+    Expanded(
+      child: _actionButton(
+        icon: swapMode ? Icons.close : Icons.swap_horiz,
+        label: t('swap'),
+        sub: '10 💎',
+        active: swapMode,
+        onTap: _toggleSwap,
       ),
+    ),
+    const SizedBox(width: 10),
+    Expanded(
+      child: _actionButton(
+        icon: hammerMode ? Icons.close : Icons.gavel,
+        label: t('hammer'),
+        sub: '7 💎',
+        active: hammerMode,
+        onTap: _toggleHammer,
+      ),
+    ),
+    const SizedBox(width: 10),
+    Expanded(
+      child: _actionButton(
+        icon: Icons.smart_display,
+        label: t('swapBonus'),
+        sub: '+10 💎',
+        active: false,
+        onTap: _watchAdReward,
+      ),
+    ),
+    const SizedBox(width: 10),
+    Expanded(
+      child: _actionButton(
+        icon: duplicateMode ? Icons.close : Icons.copy,
+        label: t('duplicate'),
+        sub: '25 💎',
+        active: duplicateMode,
+        onTap: _toggleDuplicate,
+      ),
+    ),
+    const SizedBox(width: 10),
+    Expanded(
+      child: _actionButton(
+        icon: Icons.shopping_cart,
+        label: t('shop'),
+        sub: '',
+        active: false,
+        onTap: _openShopSheet,
+      ),
+    ),
+  ],
+),
     );
   }
 
   Widget _actionButton({
-    required double uiScale,
     required IconData icon,
     required String label,
     required String sub,
@@ -1235,9 +1327,9 @@ if (_path.length >= 2)
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
-        padding: EdgeInsets.symmetric(vertical: 12 * uiScale),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18 * uiScale),
+          borderRadius: BorderRadius.circular(18),
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
@@ -1251,8 +1343,8 @@ if (_path.length >= 2)
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 22 * uiScale, color: Colors.white.withOpacity(0.95)),
-            SizedBox(height: 6 * uiScale),
+            Icon(icon, size: 22, color: Colors.white.withOpacity(0.95)),
+            const SizedBox(height: 6),
             Text(label, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 11, fontWeight: FontWeight.w900)),
             if (sub.isNotEmpty) ...[
               const SizedBox(height: 2),
@@ -1301,17 +1393,17 @@ if (_path.length >= 2)
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.06),
-                        borderRadius: BorderRadius.circular(18 * uiScale),
+                        borderRadius: BorderRadius.circular(18),
                         border: Border.all(color: Colors.white.withOpacity(0.12)),
                       ),
                       child: Row(
                         children: [
                           const Icon(Icons.diamond, color: Color(0xFFB388FF)),
-                          SizedBox(width: 10 * uiScale),
+                          const SizedBox(width: 10),
                           Text('$gems 💎', style: _neon(16)),
                           const Spacer(),
                           Text('\$$usd', style: _neon(16, opacity: 0.9)),
-                          SizedBox(width: 10 * uiScale),
+                          const SizedBox(width: 10),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
@@ -1327,7 +1419,7 @@ if (_path.length >= 2)
                   ),
                 );
               }),
-              SizedBox(height: 6 * uiScale),
+              const SizedBox(height: 6),
               Text(
                 'Not: Bu sayfa şimdilik “test purchase” gibi çalışır. Gerçek IAP entegrasyonunu istersen ekleriz.',
                 style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 11, fontWeight: FontWeight.w600),
@@ -1365,7 +1457,7 @@ if (_path.length >= 2)
                   onSelectionChanged: (s) => setState(() => lang = s.first),
                 ),
               ),
-              SizedBox(height: 10 * uiScale),
+              const SizedBox(height: 10),
               _settingsRow(
                 title: 'Reset',
                 child: FilledButton(
@@ -1394,7 +1486,7 @@ if (_path.length >= 2)
       child: Row(
         children: [
           Expanded(child: Text(title, style: _neon(13, opacity: 0.9))),
-          SizedBox(width: 10 * uiScale),
+          const SizedBox(width: 10),
           child,
         ],
       ),
