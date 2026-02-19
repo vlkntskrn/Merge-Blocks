@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 void main() {
   runApp(const MergeBlocksApp());
@@ -41,6 +42,14 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   static const int rows = 7;
   static const double kGap = 10.0;
   static const double kBannerHeight = 50.0; // fixed banner height (Phase 1)
+
+  double get uiScale {
+    // Scale UI slightly down on small screens; keep board as large as possible.
+    final h = MediaQuery.of(context).size.height;
+    final s = (h / 820.0).clamp(0.85, 1.0);
+    return s.toDouble();
+  }
+
 
 // --- State restoration (DartPad-friendly persistence) ---
 final RestorableStringN _saveBlob = RestorableStringN(null);
@@ -161,6 +170,10 @@ Random _rng = Random();
 
   String? _toast;
   Timer? _toastTimer;
+  late final AnimationController _toastCtrl;
+  late final Animation<double> _toastOpacity;
+  late final Animation<double> _toastScale;
+
 
   AppLang lang = AppLang.en;
 
@@ -172,9 +185,11 @@ Random _rng = Random();
     'swap': 'SWAP',
     'hammer': 'HAMMER',
     'watchAd': 'AD',
-  'swapBonus': 'SWAP Bonus',
-  'swapPlus': '+1 SWAP',
-  'noSwaps': 'No swaps left',
+    'earnDiamonds': 'EARN +10',
+    'duplicate': 'DUP x2',
+    'swapBonus': 'SWAP Bonus',
+    'swapPlus': '+1 SWAP',
+    'noSwaps': 'No swaps left',
     'shop': 'SHOP',
     'pause': 'PAUSE',
     'settings': 'Settings',
@@ -184,9 +199,7 @@ Random _rng = Random();
     'broken': 'Broken!',
     'shopTitle': 'Diamond Shop',
     'buy': 'Buy',
-      'watchDiamonds': 'Earn Diamonds',
-    'duplicate': 'DUPLICATE x2',
-};
+  };
 
   static const Map<String, String> _de = {
     'now': 'JETZT',
@@ -195,9 +208,11 @@ Random _rng = Random();
     'swap': 'TAUSCH',
     'hammer': 'HAMMER',
     'watchAd': 'WERBUNG',
-  'swapBonus': 'SWAP Bonus',
-  'swapPlus': '+1 SWAP',
-  'noSwaps': 'Keine Swaps übrig',
+    'earnDiamonds': '+10',
+    'duplicate': 'DUP x2',
+    'swapBonus': 'SWAP Bonus',
+    'swapPlus': '+1 SWAP',
+    'noSwaps': 'Keine Swaps übrig',
     'shop': 'SHOP',
     'pause': 'PAUSE',
     'settings': 'Einstellungen',
@@ -207,9 +222,7 @@ Random _rng = Random();
     'broken': 'Zerbrochen!',
     'shopTitle': 'Diamant-Shop',
     'buy': 'Kaufen',
-      'watchDiamonds': 'Diamanten',
-    'duplicate': 'DUPLIZIEREN x2',
-};
+  };
 
   static const Map<String, String> _tr = {
     'now': 'ŞİMDİ',
@@ -218,9 +231,11 @@ Random _rng = Random();
     'swap': 'TAKAS',
     'hammer': 'TOKMAK',
     'watchAd': 'REKLAM',
-  'swapBonus': 'Swap Bonusu',
-  'swapPlus': '+1 SWAP',
-  'noSwaps': 'Swap hakkın yok',
+    'earnDiamonds': 'ELMAS +10',
+    'duplicate': 'DUP x2',
+    'swapBonus': 'Swap Bonusu',
+    'swapPlus': '+1 SWAP',
+    'noSwaps': 'Swap hakkın yok',
     'shop': 'MAĞAZA',
     'pause': 'DURAKLAT',
     'settings': 'Ayarlar',
@@ -230,9 +245,7 @@ Random _rng = Random();
     'broken': 'Kırıldı!',
     'shopTitle': 'Elmas Mağazası',
     'buy': 'Satın al',
-      'watchDiamonds': 'Elmas Kazan',
-    'duplicate': 'DUBLICATE x2',
-};
+  };
 
   String t(String key) {
     final dict = switch (lang) {
@@ -246,6 +259,9 @@ Random _rng = Random();
   @override
   void initState() {
     super.initState();
+    _toastCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 260));
+    _toastOpacity = CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutCubic);
+    _toastScale = Tween<double>(begin: 0.92, end: 1.0).animate(CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutBack));
     WidgetsBinding.instance.addObserver(this);
 
     // Ensure grid exists immediately to avoid late-init errors.
@@ -276,6 +292,7 @@ Random _rng = Random();
   @override
   void dispose() {
     _toastTimer?.cancel();
+    _toastCtrl.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _saveToBlob();
     super.dispose();
@@ -344,56 +361,37 @@ void _resetBoard({required bool hard}) {
   }
 
 
+
+  void _clearPath() {
+    _path.clear();
+    _pathColors.clear();
+    _dragging = false;
+    _armed = false;
+    _baseValue = null;
+    _baseCount = 0;
+    _stageValue = null;
+    _stageCount = 0;
+    _lastValue = null;
+    _lastPanLocal = null;
+  }
+
   Pos? _hitTestPos(Offset local, double cellSize, double gap) {
+    // Robust hit-testing:
+    // - Use floor() (not rounding) to prevent "magnet" snapping.
+    // - Ignore pointer positions that fall inside the visual gap between cells.
     final span = cellSize + gap;
-    int c = ((local.dx + gap / 2) / span).floor();
-    int r = ((local.dy + gap / 2) / span).floor();
+
+    final c = (local.dx / span).floor();
+    final r = (local.dy / span).floor();
     if (r < 0 || r >= rows || c < 0 || c >= cols) return null;
+
+    final inCellX = local.dx - c * span;
+    final inCellY = local.dy - r * span;
+    if (inCellX < 0 || inCellX > cellSize) return null;
+    if (inCellY < 0 || inCellY > cellSize) return null;
+
     return Pos(r, c);
   }
-
-
-  void _handlePanUpdate(Offset local, double cellSize, double gap) {
-    final prev = _lastPanLocal;
-    _lastPanLocal = local;
-
-    if (prev == null) {
-      final p = _hitTestPos(local, cellSize, gap);
-      if (p != null) _onCellEnter(p);
-      return;
-    }
-
-    final delta = local - prev;
-    final dist = delta.distance;
-    if (dist <= 0.1) {
-      final p = _hitTestPos(local, cellSize, gap);
-      if (p != null) _onCellEnter(p);
-      return;
-    }
-
-    // Sample intermediate points to avoid skipping diagonals when the pointer moves fast.
-    final step = max(6.0, (cellSize + gap) / 3);
-    final n = (dist / step).ceil().clamp(1, 40);
-
-    for (int i = 1; i <= n; i++) {
-      final t = i / n;
-      final pt = Offset(prev.dx + delta.dx * t, prev.dy + delta.dy * t);
-      final p = _hitTestPos(pt, cellSize, gap);
-      if (p != null) _onCellEnter(p);
-    }
-  }
-
-
-void _clearPath() {
-  _path.clear();
-  _pathColors.clear();
-  _dragging = false;
-  _baseValue = null;
-  _baseCount = 0;
-  _armed = false;
-  _stageValue = null;
-    _stageCount = 0;
-}
 
 BigInt? _valueAt(Pos p) => _inBounds(p) ? grid[p.r][p.c] : null;
 
@@ -494,6 +492,7 @@ void _onCellEnter(Pos p) {
   if (v == lv || v == (lv << 1)) {
     _path.add(p);
     _pathColors.add(_chainColorForIndex(_path.length - 1));
+    _playChainNote(_path.length);
     _lastValue = v;
     setState(() {});
   }
@@ -704,6 +703,7 @@ void _collapseAndFill() {
 
   void _handleCombo(int merges) {
     _lastCombo = merges;
+    _playMergeMelody(merges);
     if (merges < 5) return;
 
     String msg;
@@ -867,10 +867,34 @@ void _handleDuplicateTap(Pos p) {
   void _showToast(String msg) {
     _toastTimer?.cancel();
     setState(() => _toast = msg);
+    _toastCtrl.forward(from: 0);
+
     _toastTimer = Timer(const Duration(milliseconds: 1200), () {
       if (!mounted) return;
-      setState(() => _toast = null);
+      // Fade out quickly before removing.
+      _toastCtrl.reverse().whenComplete(() {
+        if (!mounted) return;
+        setState(() => _toast = null);
+      });
     });
+  }
+
+  void _playChainNote(int index) {
+    // Lightweight, plugin-free feedback. On mobile this is a short click + haptic.
+    // (For real piano samples later, swap this out with an audio plugin.)
+    HapticFeedback.selectionClick();
+    SystemSound.play(SystemSoundType.click);
+  }
+
+  void _playMergeMelody(int mergedCount) {
+    // Play a short ascending "piano-like" click sequence.
+    final n = mergedCount.clamp(2, 8);
+    for (int i = 0; i < n; i++) {
+      Timer(Duration(milliseconds: 70 * i), () {
+        SystemSound.play(SystemSoundType.click);
+      });
+    }
+    if (n >= 5) HapticFeedback.lightImpact();
   }
 
   String _fmtBig(BigInt n) {
@@ -956,14 +980,27 @@ void _handleDuplicateTap(Pos p) {
                 // Keep toast above action bar + banner.
                 bottom: 14 + kBannerHeight + 112,
                 child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.55),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.white.withOpacity(0.18)),
+                  child: FadeTransition(
+                    opacity: _toastOpacity,
+                    child: ScaleTransition(
+                      scale: _toastScale,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0E1A3B).withOpacity(0.86),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: const Color(0xFF7DF9FF).withOpacity(0.28)),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF7DF9FF).withOpacity(0.22),
+                              blurRadius: 22,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                        ),
+                        child: Text(_toast!, style: _neon(15, opacity: 0.98)),
+                      ),
                     ),
-                    child: Text(_toast!, style: _neon(14)),
                   ),
                 ),
               ),
@@ -1363,38 +1400,77 @@ Widget _buildBoard() {
   Widget _actionButton({
     required IconData icon,
     required String label,
-    required String sub,
+    String? sub,
     required bool active,
     required VoidCallback onTap,
+    double? height,
+    bool showLabel = true,
+    bool showSub = true,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: active
-                ? [Colors.white.withOpacity(0.18), Colors.white.withOpacity(0.08)]
-                : [Colors.white.withOpacity(0.12), Colors.white.withOpacity(0.05)],
-          ),
-          border: Border.all(color: Colors.white.withOpacity(active ? 0.22 : 0.10)),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 14, offset: const Offset(0, 10))],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 20, color: Colors.white.withOpacity(0.95)),
-            const SizedBox(height: 4),
-            Text(label, style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 11, fontWeight: FontWeight.w900)),
-            if (sub.isNotEmpty) ...[
-              const SizedBox(height: 1),
-              Text(sub, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 10, fontWeight: FontWeight.w800)),
+    final scale = uiScale;
+    final h = height ?? (74.0 * scale);
+
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          height: h,
+          margin: EdgeInsets.symmetric(horizontal: 5 * scale),
+          padding: EdgeInsets.symmetric(horizontal: 10 * scale, vertical: 10 * scale),
+          decoration: BoxDecoration(
+            color: active ? const Color(0xFF1B2A57).withOpacity(0.90) : const Color(0xFF0E1A3B).withOpacity(0.78),
+            borderRadius: BorderRadius.circular(16 * scale),
+            border: Border.all(color: active ? const Color(0xFF7DF9FF).withOpacity(0.60) : Colors.white.withOpacity(0.06)),
+            boxShadow: [
+              if (active)
+                BoxShadow(
+                  color: const Color(0xFF7DF9FF).withOpacity(0.20),
+                  blurRadius: 18 * scale,
+                  spreadRadius: 1,
+                )
             ],
-          ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 22 * scale, color: Colors.white.withOpacity(0.95)),
+              SizedBox(width: 10 * scale),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    if (showLabel)
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: _neon(12 * scale, opacity: 0.96),
+                        ),
+                      ),
+                    if (showSub && sub != null) ...[
+                      SizedBox(height: 4 * scale),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          sub,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: _neon(12 * scale, opacity: 0.86),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
