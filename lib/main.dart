@@ -4,6 +4,61 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+class _ShardVanishPainter extends CustomPainter {
+  final double t;
+  final int seed;
+  final Color baseColor;
+
+  _ShardVanishPainter({required this.t, required this.seed, required this.baseColor});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rng = Random(seed);
+    final fade = (1.0 - t).clamp(0.0, 1.0);
+    final scale = 1.0 + t * 0.08;
+    canvas.save();
+    canvas.translate(size.width / 2, size.height / 2);
+    canvas.scale(scale, scale);
+    canvas.translate(-size.width / 2, -size.height / 2);
+
+    final shardCount = 10;
+    for (int i = 0; i < shardCount; i++) {
+      final a = rng.nextDouble() * pi * 2;
+      final speed = 10.0 + rng.nextDouble() * 22.0;
+      final driftX = cos(a) * speed * t;
+      final driftY = sin(a) * speed * t + (24.0 * t * t);
+      final w = size.width * (0.10 + rng.nextDouble() * 0.14);
+      final h = size.height * (0.08 + rng.nextDouble() * 0.12);
+      final x = (size.width / 2) - (w / 2) + driftX;
+      final y = (size.height / 2) - (h / 2) + driftY;
+      final rrect = RRect.fromRectAndRadius(Rect.fromLTWH(x, y, w, h), Radius.circular(3));
+
+      final paint = Paint()
+        ..style = PaintingStyle.fill
+        ..color = baseColor.withOpacity((0.35 + rng.nextDouble() * 0.35) * fade);
+      canvas.save();
+      canvas.translate(x + w / 2, y + h / 2);
+      canvas.rotate((rng.nextDouble() * 1.8 - 0.9) * t);
+      canvas.translate(-(x + w / 2), -(y + h / 2));
+      canvas.drawRRect(rrect, paint);
+      canvas.restore();
+    }
+
+    // Soft dust glow
+    final glow = Paint()
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 18)
+      ..color = baseColor.withOpacity(0.22 * fade);
+    canvas.drawCircle(Offset(size.width / 2, size.height / 2), size.shortestSide * (0.28 + 0.10 * t), glow);
+
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _ShardVanishPainter oldDelegate) {
+    return oldDelegate.t != t || oldDelegate.seed != seed || oldDelegate.baseColor != baseColor;
+  }
+}
+
 void main() {
   runApp(const MergeBlocksApp());
 }
@@ -91,13 +146,18 @@ void _saveToBlob() {
 
   void _startAutoSave() {
     _autoSaveTimer?.cancel();
-    // Frequent small writes so when app is backgrounded/closed, last state is already persisted.
-    _autoSaveTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      if (!mounted) return;
+    _autoSaveTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!_loaded) return;
       _saveToBlob();
     });
   }
 
+  bool _loadFromPersisted() {
+    final blob = _saveBlob.value;
+    if (blob == null || blob.isEmpty) return false;
+    _loadFromBlob(blob);
+    return true;
+  }
 
 void _loadFromBlob(String blob) {
   try {
@@ -189,6 +249,8 @@ Random _rng = Random();
   // ===== Premium COMBO overlay =====
   String? _combo;
   Timer? _comboTimer;
+  Timer? _autoSaveTimer;
+  bool _loaded = false;
   late final AnimationController _comboCtrl;
   late final Animation<double> _comboOpacity;
   late final Animation<double> _comboScale;
@@ -209,10 +271,6 @@ Random _rng = Random();
   // Bottom bar pulse
   late final AnimationController _pulseCtrl;
 
-  // Autosave (keeps Restoration blob fresh) + vanish/shatter ticker.
-  Timer? _autoSaveTimer;
-  late final AnimationController _vanishCtrl;
-
   AppLang lang = AppLang.en;
 
   // ===== Localization =====
@@ -220,6 +278,7 @@ Random _rng = Random();
     'now': 'NOW',
     'max': 'MAX',
     'next': 'NEXT',
+    'goal': 'GOAL',
     'swap': 'SWAP',
     'hammer': 'HAMMER',
     'watchAd': 'AD',
@@ -237,13 +296,13 @@ Random _rng = Random();
     'broken': 'Broken!',
     'shopTitle': 'Diamond Shop',
     'buy': 'Buy',
-    'goal': 'GOAL',
-};
+  };
 
   static const Map<String, String> _de = {
     'now': 'JETZT',
     'max': 'MAX',
-    'next': 'ZIEL',
+    'next': 'NÄCHSTE',
+    'goal': 'ZIEL',
     'swap': 'TAUSCH',
     'hammer': 'HAMMER',
     'watchAd': 'WERBUNG',
@@ -267,6 +326,7 @@ Random _rng = Random();
     'now': 'ŞİMDİ',
     'max': 'EN BÜYÜK',
     'next': 'SONRAKİ',
+    'goal': 'HEDEF',
     'swap': 'TAKAS',
     'hammer': 'TOKMAK',
     'watchAd': 'REKLAM',
@@ -284,8 +344,7 @@ Random _rng = Random();
     'broken': 'Kırıldı!',
     'shopTitle': 'Elmas Mağazası',
     'buy': 'Satın al',
-    'goal': 'HEDEF',
-};
+  };
 
   String t(String key) {
     final dict = switch (lang) {
@@ -319,14 +378,6 @@ Random _rng = Random();
 
     _pulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
 
-    _vanishCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: _VanishFx.kLifeMs),
-    )..addListener(_tickVanishFx);
-
-    _startAutoSave();
-
-
 
     WidgetsBinding.instance.addObserver(this);
 
@@ -335,11 +386,13 @@ Random _rng = Random();
 
     // If no restoration happened, start a new game after first frame.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (!_didRestore && _saveBlob.value == null) {
+      final ok = _loadFromPersisted();
+      if (!ok) {
         _resetBoard(hard: true);
-        _saveToBlob();
       }
+      _loaded = true;
+      _startAutoSave();
+      if (mounted) setState(() {});
     });
   }
 
@@ -367,16 +420,12 @@ Random _rng = Random();
     _particleCtrl.removeListener(_tickParticles);
     _particleCtrl.dispose();
     _pulseCtrl.dispose();
+    _autoSaveTimer?.cancel();
 
 
     WidgetsBinding.instance.removeObserver(this);
     _saveToBlob();
-    
-    _autoSaveTimer?.cancel();
-    _saveToBlob();
-    _vanishCtrl.removeListener(_tickVanishFx);
-    _vanishCtrl.dispose();
-super.dispose();
+    super.dispose();
   }
 
 void _resetBoard({required bool hard}) {
@@ -674,15 +723,10 @@ void _applyMergeChain(List<Pos> chain) {
   // Clear all but the final (target) position.
   for (int i = 0; i < pos.length - 1; i++) {
     final p = pos[i];
-    final v = grid[p.r][p.c];
-    if (v != null) {
-      _vanishFx.add(_VanishFx(pos: p, value: v));
-      // Hard cap to avoid unbounded growth during long sessions.
-      if (_vanishFx.length > 48) _vanishFx.removeAt(0);
-    }
+    final old = grid[p.r][p.c];
+    if (old != null) _spawnVanishFx(p, old);
     grid[p.r][p.c] = null;
   }
-  if (_vanishFx.isNotEmpty && !_vanishCtrl.isAnimating) _vanishCtrl.repeat();
 
   final targetPos = pos.last;
   grid[targetPos.r][targetPos.c] = target;
@@ -707,6 +751,21 @@ void _applyMergeChain(List<Pos> chain) {
 
 
 
+
+  void _spawnVanishFx(Pos p, BigInt value) {
+    final fx = _VanishFx(
+      pos: p,
+      value: value,
+      tick: _spawnTick,
+      seed: Object.hash(p.r, p.c, value.toString(), _spawnTick),
+    );
+    _vanishFx.add(fx);
+    // Remove automatically a bit later (safety).
+    Future.delayed(const Duration(milliseconds: 520), () {
+      if (!mounted) return;
+      setState(() => _vanishFx.remove(fx));
+    });
+  }
 void _cascadeFrom(Pos start) {
   // Chain merge (no collapse during cascade):
   // While the tile has an equal neighbour (8-direction), merge pairwise into this tile.
@@ -731,6 +790,8 @@ void _cascadeFrom(Pos start) {
     if (neighborSame == null) return;
 
     // Consume neighbour into current.
+    final gone = grid[neighborSame.r][neighborSame.c];
+    if (gone != null) _spawnVanishFx(neighborSame, gone);
     grid[neighborSame.r][neighborSame.c] = null;
     final newV = v * BigInt.from(2);
     grid[cur.r][cur.c] = newV;
@@ -1017,19 +1078,6 @@ void _handleDuplicateTap(Pos p) {
     if (mounted) setState(() {});
   }
 
-  void _tickVanishFx() {
-    if (_vanishFx.isEmpty) {
-      if (_vanishCtrl.isAnimating) _vanishCtrl.stop();
-      return;
-    }
-    final now = DateTime.now().millisecondsSinceEpoch;
-    _vanishFx.removeWhere((fx) => (now - fx.startedMs) > _VanishFx.kLifeMs);
-    if (!mounted) return;
-    setState(() {});
-    if (_vanishFx.isEmpty && _vanishCtrl.isAnimating) _vanishCtrl.stop();
-  }
-
-
 
   void _playChainNote(int index) {
     // Lightweight, plugin-free feedback. On mobile this is a short click + haptic.
@@ -1105,8 +1153,9 @@ void _handleDuplicateTap(Pos p) {
   Widget build(BuildContext context) {
     final goal = _goalForLevel(levelIdx);
     final curMax = _maxOnBoard();
+    final bestLocal = best;
     final nowLabel = _fmtBig(curMax);
-    final nextValue = curMax == BigInt.zero ? BigInt.zero : (curMax * BigInt.from(2));
+    final nextValue = (curMax <= BigInt.zero) ? BigInt.from(2) : (curMax << 1);
     final nextLabel = _fmtBig(nextValue);
     final goalLabel = _fmtBig(goal);
     final ratio = goal == BigInt.zero ? 0.0 : min(1.0, curMax.toDouble() / goal.toDouble());
@@ -1282,7 +1331,7 @@ void _handleDuplicateTap(Pos p) {
             children: [
               Expanded(child: _miniStatChip(t('now'), nowLabel)),
               const SizedBox(width: 10),
-              Expanded(child: _miniStatChip(t('next'), nextLabel)),
+              Expanded(child: _miniStatChip(t('max'), nextLabel)),
               const SizedBox(width: 10),
               Expanded(child: _miniStatChip(t('goal'), goalLabel)),
             ],
@@ -1453,134 +1502,93 @@ Widget _buildBoard() {
   // Premium merge vanish FX overlay (safe stub).
   // If you later want a richer effect, we can animate opacity/scale here.
   Widget _vanishFxWidget(_VanishFx fx, double size) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final tRaw = (now - fx.startedMs) / _VanishFx.kLifeMs;
-    final t = tRaw.clamp(0.0, 1.0);
-    if (t >= 1.0) return const SizedBox.shrink();
-
-    final base = _tileColor(fx.value);
-    final fade = (1.0 - t);
-    final spread = (0.4 + t * 1.4);
-    final fall = (t * t) * size * 0.9;
-
-    // Deterministic pseudo-random without importing extra libs.
-    double rnd(int k) {
-      final x = sin((fx.seed + k) * 999.0) * 43758.5453;
-      return x - x.floorToDouble();
-    }
-
-    final pieces = <Widget>[];
-    for (int i = 0; i < 7; i++) {
-      final r1 = rnd(i * 2);
-      final r2 = rnd(i * 2 + 1);
-      final dx = (r1 - 0.5) * size * 0.9 * spread;
-      final dy = (r2 - 0.6) * size * 0.6 * spread + fall;
-      final rot = (r1 - 0.5) * 1.6 * pi * t;
-
-      final w = size * (0.14 + rnd(i + 7) * 0.08);
-      final h = size * (0.10 + rnd(i + 13) * 0.07);
-
-      pieces.add(Positioned(
-        left: (size - w) / 2 + dx,
-        top: (size - h) / 2 + dy,
-        child: Transform.rotate(
-          angle: rot,
-          child: Opacity(
-            opacity: fade * (0.9 - i * 0.06).clamp(0.0, 1.0),
-            child: Container(
-              width: w,
-              height: h,
-              decoration: BoxDecoration(
-                color: _lighten(base, 0.12 + (i % 3) * 0.04),
-                borderRadius: BorderRadius.circular(w * 0.25),
-                boxShadow: [
-                  BoxShadow(
-                    blurRadius: 10 * fade,
-                    spreadRadius: 1 * fade,
-                    color: base.withOpacity(0.35 * fade),
-                  ),
-                ],
-              ),
-            ),
+    return TweenAnimationBuilder<double>(
+      key: ValueKey('vanish_${fx.pos.r}_${fx.pos.c}_${fx.tick}_${fx.seed}'),
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+      onEnd: () {
+        if (!mounted) return;
+        setState(() => _vanishFx.remove(fx));
+      },
+      builder: (context, t, _) {
+        return CustomPaint(
+          painter: _ShardVanishPainter(
+            t: t,
+            seed: fx.seed,
+            baseColor: _tileColor(fx.value),
           ),
-        ),
-      ));
-    }
-
-    return IgnorePointer(child: Stack(children: pieces));
+        );
+      },
+    );
   }
+
 
 
 
   Widget _cellWidget(Pos p, double size) {
-    final v = grid[p.r][p.c];
-    final isInPath = _path.contains(p);
-    final isTarget = _path.isNotEmpty && _path.last == p;
+  final v = grid[p.r][p.c];
+  final selected = _path.contains(p);
+  final isSwapFirst = (swapMode && _swapFirst == p);
 
-    final baseColor = v == null ? const Color(0x22000000) : _tileColor(v);
-    final top = _lighten(baseColor, 0.08);
-    final bottom = _darken(baseColor, 0.16);
+  final steps = _fallSteps[p] ?? 0;
+  final beginDy = steps <= 0 ? 0.0 : -(steps * (size + kGap));
 
-    final glow = isInPath ? 0.55 : 0.22;
-    final borderGlow = isTarget ? 0.9 : (isInPath ? 0.65 : 0.28);
+  final baseColor = v == null ? Colors.white.withOpacity(0.05) : _tileColor(v).withOpacity(0.92);
+  final top = _lighten(baseColor, 0.08);
+  final bottom = _darken(baseColor, 0.16);
 
-    Widget tileFace() {
-      if (v == null) return const SizedBox.shrink();
-      return Center(
-        child: Text(
-          _fmtBig(v),
-          style: _neon(size * 0.26, opacity: 0.96),
-          textAlign: TextAlign.center,
-        ),
-      );
-    }
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 120),
-      curve: Curves.easeOut,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(size * 0.22),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [top.withOpacity(0.95), bottom.withOpacity(0.95)],
-        ),
-        boxShadow: [
-          BoxShadow(
-            blurRadius: 18,
-            spreadRadius: 1,
-            color: baseColor.withOpacity(glow),
+  return TweenAnimationBuilder<double>(
+      key: ValueKey('fall_${p.r}_${p.c}_${v?.toString() ?? "n"}_${_spawnTick}'),
+      tween: Tween<double>(begin: beginDy, end: 0.0),
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      builder: (context, dy, child) {
+        return Transform.translate(offset: Offset(0, dy), child: child);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          gradient: v == null
+              ? null
+              : LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [top, baseColor, bottom],
+                ),
+          color: v == null ? Colors.white.withOpacity(0.05) : null,
+          borderRadius: BorderRadius.circular(12), // more square-ish
+          border: Border.all(
+            color: (selected || isSwapFirst) ? Colors.white.withOpacity(0.90) : Colors.white.withOpacity(0.10),
+            width: (selected || isSwapFirst) ? 2 : 1,
           ),
-        ],
-        border: Border.all(
-          width: 2,
-          color: baseColor.withOpacity(borderGlow),
-        ),
-      ),
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 260),
-        switchInCurve: Curves.easeOutBack,
-        switchOutCurve: Curves.easeInCubic,
-        transitionBuilder: (child, anim) {
-          final fade = CurvedAnimation(parent: anim, curve: Curves.easeOut);
-          final scale = Tween<double>(begin: 0.9, end: 1.0).animate(fade);
-          final rot = Tween<double>(begin: -0.06, end: 0.0).animate(fade);
-          return FadeTransition(
-            opacity: fade,
-            child: ScaleTransition(
-              scale: scale,
-              child: RotationTransition(turns: rot, child: child),
+          boxShadow: [
+            // subtle 3D depth
+            BoxShadow(
+              color: Colors.black.withOpacity(selected ? 0.50 : 0.32),
+              blurRadius: selected ? 18 : 12,
+              offset: const Offset(0, 8),
             ),
-          );
-        },
-        child: Container(
-          key: ValueKey<String>(v?.toString() ?? 'empty'),
-          alignment: Alignment.center,
-          child: tileFace(),
+            if (v != null)
+              BoxShadow(
+                color: Colors.white.withOpacity(0.10),
+                blurRadius: 8,
+                offset: const Offset(-2, -2),
+              ),
+          ],
+        ),
+        child: Center(
+          child: v == null
+              ? const SizedBox.shrink()
+              : Text(
+                  _fmtBig(v),
+                  style: _neon(size * 0.26, opacity: 0.96),
+                ),
         ),
       ),
     );
-  }
+}
 
 
   Widget _buildBottomBar() {
@@ -2006,16 +2014,11 @@ class _TileFall {
 }
 
 class _VanishFx {
-  static const int kLifeMs = 450;
-
   final Pos pos;
   final BigInt value;
-  final int startedMs;
+  final int tick;
   final int seed;
-
-  _VanishFx({required this.pos, required this.value})
-      : startedMs = DateTime.now().millisecondsSinceEpoch,
-        seed = (pos.r * 73856093) ^ (pos.c * 19349663) ^ value.hashCode;
+  const _VanishFx({required this.pos, required this.value, required this.tick, required this.seed});
 }
 
 
@@ -2163,4 +2166,3 @@ class _ShimmerFrame extends StatelessWidget {
     );
   }
 }
-
