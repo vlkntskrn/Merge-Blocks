@@ -174,7 +174,9 @@ Random _rng = Random();
   late final Animation<double> _toastOpacity;
   late final Animation<double> _toastScale;
 
-  // Premium combo overlay (bigger than toast)
+
+
+  // ===== Premium COMBO overlay =====
   String? _combo;
   Timer? _comboTimer;
   late final AnimationController _comboCtrl;
@@ -183,7 +185,19 @@ Random _rng = Random();
   late final Animation<Offset> _comboSlide;
   late final Animation<double> _comboRotate;
 
+  // Shimmer wave for combo card
+  late final AnimationController _shimmerCtrl;
 
+  // Mega combo shake
+  late final AnimationController _shakeCtrl;
+  late final Animation<double> _shakeAnim;
+
+  // Particle burst for mega combo
+  final List<_Particle> _particles = <_Particle>[];
+  late final AnimationController _particleCtrl;
+
+  // Bottom bar pulse
+  late final AnimationController _pulseCtrl;
 
   AppLang lang = AppLang.en;
 
@@ -272,16 +286,24 @@ Random _rng = Random();
     _toastCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 260));
     _toastOpacity = CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutCubic);
     _toastScale = Tween<double>(begin: 0.92, end: 1.0).animate(CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutBack));
-    _comboCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
-    _comboOpacity = CurvedAnimation(parent: _comboCtrl, curve: const Interval(0.0, 0.7, curve: Curves.easeOut));
-    _comboScale = TweenSequence<double>([
-      TweenSequenceItem(tween: Tween(begin: 0.60, end: 1.25).chain(CurveTween(curve: Curves.easeOutBack)), weight: 70),
-      TweenSequenceItem(tween: Tween(begin: 1.25, end: 1.00).chain(CurveTween(curve: Curves.easeOutCubic)), weight: 30),
-    ]).animate(_comboCtrl);
-    _comboSlide = Tween<Offset>(begin: const Offset(0, 0.18), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _comboCtrl, curve: const Interval(0.0, 0.9, curve: Curves.easeOutCubic)));
-    _comboRotate = Tween<double>(begin: -0.05, end: 0.0)
-        .animate(CurvedAnimation(parent: _comboCtrl, curve: const Interval(0.0, 0.8, curve: Curves.easeOutCubic)));
+
+    // Combo overlay controller
+    _comboCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
+    _comboOpacity = CurvedAnimation(parent: _comboCtrl, curve: Curves.easeOutCubic);
+    _comboScale = Tween<double>(begin: 0.82, end: 1.0).animate(CurvedAnimation(parent: _comboCtrl, curve: Curves.easeOutBack));
+    _comboSlide = Tween<Offset>(begin: const Offset(0, 0.10), end: Offset.zero).animate(CurvedAnimation(parent: _comboCtrl, curve: Curves.easeOutCubic));
+    _comboRotate = Tween<double>(begin: -0.015, end: 0.0).animate(CurvedAnimation(parent: _comboCtrl, curve: Curves.easeOutCubic));
+
+    _shimmerCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
+    _shakeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
+    _shakeAnim = CurvedAnimation(parent: _shakeCtrl, curve: Curves.easeOutCubic);
+
+    _particleCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+    _particleCtrl.addListener(_tickParticles);
+
+    _pulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
+
+
     WidgetsBinding.instance.addObserver(this);
 
     // Ensure grid exists immediately to avoid late-init errors.
@@ -312,9 +334,17 @@ Random _rng = Random();
   @override
   void dispose() {
     _toastTimer?.cancel();
-    _comboTimer?.cancel();
     _toastCtrl.dispose();
+
+    _comboTimer?.cancel();
     _comboCtrl.dispose();
+    _shimmerCtrl.dispose();
+    _shakeCtrl.dispose();
+    _particleCtrl.removeListener(_tickParticles);
+    _particleCtrl.dispose();
+    _pulseCtrl.dispose();
+
+
     WidgetsBinding.instance.removeObserver(this);
     _saveToBlob();
     super.dispose();
@@ -743,7 +773,7 @@ void _collapseAndFill() {
           ? 'SUPER KOMBO!'
           : (lang == AppLang.tr ? 'SÜPER KOMBO!' : 'SUPER COMBO!');
     }
-    _showCombo(msg);
+    _showComboOverlay(msg, merges: merges);
   }
 
   void _maybeShowNextLevelReward() {
@@ -902,12 +932,18 @@ void _handleDuplicateTap(Pos p) {
   }
 
 
-  void _showCombo(String msg) {
+  void _showComboOverlay(String msg, {required int merges}) {
     _comboTimer?.cancel();
     setState(() => _combo = msg);
     _comboCtrl.forward(from: 0);
 
-    _comboTimer = Timer(const Duration(milliseconds: 1400), () {
+    if (merges >= 11) {
+      if (!_shakeCtrl.isAnimating) _shakeCtrl.forward(from: 0);
+      _spawnParticles();
+      HapticFeedback.mediumImpact();
+    }
+
+    _comboTimer = Timer(const Duration(milliseconds: 1100), () {
       if (!mounted) return;
       _comboCtrl.reverse().whenComplete(() {
         if (!mounted) return;
@@ -915,6 +951,36 @@ void _handleDuplicateTap(Pos p) {
       });
     });
   }
+
+  void _spawnParticles() {
+    _particles.clear();
+    final rnd = Random();
+    for (int i = 0; i < 22; i++) {
+      final ang = rnd.nextDouble() * pi * 2;
+      final spd = 40 + rnd.nextDouble() * 120;
+      final vel = Offset(cos(ang) * spd, sin(ang) * spd);
+      _particles.add(_Particle(
+        pos: Offset(rnd.nextDouble() * 8 - 4, rnd.nextDouble() * 8 - 4),
+        vel: vel,
+        life: 1.0,
+        size: 2.2 + rnd.nextDouble() * 2.8,
+      ));
+    }
+    _particleCtrl.forward(from: 0);
+  }
+
+  void _tickParticles() {
+    if (_particles.isEmpty) return;
+    const dt = 1 / 60.0;
+    for (final p in _particles) {
+      p.pos += p.vel * dt;
+      p.vel = Offset(p.vel.dx * 0.96, (p.vel.dy * 0.96) + 18 * dt);
+      p.life -= dt * 1.2;
+    }
+    _particles.removeWhere((p) => p.life <= 0);
+    if (mounted) setState(() {});
+  }
+
 
   void _playChainNote(int index) {
     // Lightweight, plugin-free feedback. On mobile this is a short click + haptic.
@@ -1041,46 +1107,35 @@ void _handleDuplicateTap(Pos p) {
                   ),
                 ),
               ),
-
+          
+            // Premium COMBO overlay (center)
             if (_combo != null)
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 108,
-                child: Center(
-                  child: FadeTransition(
-                    opacity: _comboOpacity,
-                    child: SlideTransition(
-                      position: _comboSlide,
-                      child: ScaleTransition(
-                        scale: _comboScale,
-                        child: RotationTransition(
-                          turns: _comboRotate,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(22),
-                              gradient: LinearGradient(
-                                colors: [
-                                  const Color(0xFF7C4DFF).withOpacity(0.22),
-                                  const Color(0xFF7DF9FF).withOpacity(0.14),
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Center(
+                    child: FadeTransition(
+                      opacity: _comboOpacity,
+                      child: SlideTransition(
+                        position: _comboSlide,
+                        child: ScaleTransition(
+                          scale: _comboScale,
+                          child: RotationTransition(
+                            turns: _comboRotate,
+                            child: AnimatedBuilder(
+                              animation: _shakeAnim,
+                              builder: (context, child) {
+                                if (!_shakeCtrl.isAnimating) return child!;
+                                final mag = 10.0 * (1.0 - _shakeAnim.value);
+                                final dx = sin(_shakeAnim.value * pi * 10) * mag;
+                                final dy = cos(_shakeAnim.value * pi * 12) * mag;
+                                return Transform.translate(offset: Offset(dx, dy), child: child);
+                              },
+                              child: _ComboCard(
+                                text: _combo!,
+                                shimmerT: _shimmerCtrl,
+                                particles: _particles,
+                                particleT: _particleCtrl,
                               ),
-                              border: Border.all(color: const Color(0xFF7DF9FF).withOpacity(0.35)),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: const Color(0xFF7DF9FF).withOpacity(0.26),
-                                  blurRadius: 34,
-                                  spreadRadius: 2,
-                                ),
-                              ],
-                            ),
-                            child: Text(
-                              _combo!,
-                              textAlign: TextAlign.center,
-                              style: _neon(44 * uiScale, opacity: 0.98).copyWith(fontWeight: FontWeight.w900),
                             ),
                           ),
                         ),
@@ -1089,7 +1144,7 @@ void _handleDuplicateTap(Pos p) {
                   ),
                 ),
               ),
-          ],
+],
         ),
       ),
       bottomNavigationBar: SafeArea(
@@ -1420,7 +1475,6 @@ Widget _buildBoard() {
 
 
   Widget _buildBottomBar() {
-  final scale = uiScale;
   return Container(
     padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
     decoration: BoxDecoration(
@@ -1429,59 +1483,74 @@ Widget _buildBoard() {
     ),
     child: Row(
       children: [
-        _actionButton(
-          icon: swapMode ? Icons.close : Icons.swap_horiz,
-          label: t('swap'),
-          sub: '10 💎',
-          active: swapMode,
-          onTap: _toggleSwap,
-          showLabel: false,
+        Expanded(
+          child: _actionButton(
+            icon: swapMode ? Icons.close : Icons.swap_horiz,
+            label: '',
+            sub: '10',
+            active: swapMode,
+            onTap: _toggleSwap,
+            showLabel: false,
+            showSub: true,
+          ),
         ),
         const SizedBox(width: 6),
-        _actionButton(
-          icon: hammerMode ? Icons.close : Icons.gavel,
-          label: t('hammer'),
-          sub: '7 💎',
-          active: hammerMode,
-          onTap: _toggleHammer,
-          showLabel: false,
+        Expanded(
+          child: _actionButton(
+            icon: hammerMode ? Icons.close : Icons.gavel,
+            label: '',
+            sub: '7',
+            active: hammerMode,
+            onTap: _toggleHammer,
+            showLabel: false,
+            showSub: true,
+          ),
         ),
         const SizedBox(width: 6),
-        _actionButton(
-          icon: Icons.smart_display,
-          label: t('watchDiamonds'),
-          sub: '+10 💎',
-          active: false,
-          onTap: _watchAdReward,
-          showLabel: false,
+        Expanded(
+          child: _actionButton(
+            icon: Icons.smart_display,
+            label: '',
+            sub: '+10',
+            active: false,
+            onTap: _watchAdReward,
+            showLabel: false,
+            showSub: true,
+          ),
         ),
         const SizedBox(width: 6),
-        _actionButton(
-          iconWidget: duplicateMode
-              ? Icon(Icons.close, size: 30 * scale, color: Colors.white.withOpacity(0.95))
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('2x', style: _neon(18 * scale, opacity: 0.98).copyWith(fontWeight: FontWeight.w900)),
-                    SizedBox(width: 6 * scale),
-                    Icon(Icons.diamond, size: 22 * scale, color: const Color(0xFFB388FF)),
-                  ],
-                ),
-          label: t('duplicate'),
-          sub: '20 💎',
-          active: duplicateMode,
-          onTap: _toggleDuplicate,
-          showLabel: false,
+        Expanded(
+          child: _actionButton(
+            icon: duplicateMode ? Icons.close : Icons.copy,
+            iconWidget: duplicateMode
+                ? null
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Text('2x', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+                      SizedBox(width: 6),
+                      Icon(Icons.diamond, size: 20, color: Color(0xFFB388FF)),
+                    ],
+                  ),
+            label: '',
+            sub: '20',
+            active: duplicateMode,
+            onTap: _toggleDuplicate,
+            showLabel: false,
+            showSub: true,
+          ),
         ),
         const SizedBox(width: 6),
-        _actionButton(
-          icon: Icons.shopping_cart,
-          label: t('shop'),
-          sub: '',
-          active: false,
-          onTap: _openShopSheet,
-          showLabel: false,
-          showSub: false,
+        Expanded(
+          child: _actionButton(
+            icon: Icons.shopping_cart,
+            label: '',
+            sub: '',
+            active: false,
+            onTap: _openShopSheet,
+            showLabel: false,
+            showSub: false,
+          ),
         ),
       ],
     ),
@@ -1490,7 +1559,7 @@ Widget _buildBoard() {
 
 
   Widget _actionButton({
-    IconData? icon,
+    required IconData icon,
     Widget? iconWidget,
     required String label,
     String? sub,
@@ -1503,90 +1572,76 @@ Widget _buildBoard() {
     final scale = uiScale;
     final h = height ?? (74.0 * scale);
 
-    final Widget leading = iconWidget ??
-        Icon(icon ?? Icons.circle, size: (showLabel ? 22 : 30) * scale, color: Colors.white.withOpacity(0.95));
-
     return Expanded(
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
+          duration: const Duration(milliseconds: 120),
           height: h,
           margin: EdgeInsets.symmetric(horizontal: 5 * scale),
           padding: EdgeInsets.symmetric(horizontal: 10 * scale, vertical: 10 * scale),
           decoration: BoxDecoration(
-            color: active ? const Color(0xFF1B2A57).withOpacity(0.92) : const Color(0xFF0E1A3B).withOpacity(0.78),
+            color: active ? const Color(0xFF1B2A57).withOpacity(0.90) : const Color(0xFF0E1A3B).withOpacity(0.78),
             borderRadius: BorderRadius.circular(16 * scale),
             border: Border.all(color: active ? const Color(0xFF7DF9FF).withOpacity(0.60) : Colors.white.withOpacity(0.06)),
             boxShadow: [
               if (active)
                 BoxShadow(
-                  color: const Color(0xFF7DF9FF).withOpacity(0.22),
-                  blurRadius: 20 * scale,
+                  color: const Color(0xFF7DF9FF).withOpacity(0.20),
+                  blurRadius: 18 * scale,
                   spreadRadius: 1,
                 )
             ],
           ),
-          child: Center(
-            child: showLabel
-                ? Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      leading,
-                      SizedBox(width: 10 * scale),
-                      Expanded(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.center,
-                                style: _neon(12 * scale, opacity: 0.96),
-                              ),
-                            ),
-                            if (showSub && sub != null) ...[
-                              SizedBox(height: 4 * scale),
-                              FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  sub,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.center,
-                                  style: _neon(12 * scale, opacity: 0.86),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
+          child: AnimatedBuilder(
+            animation: _pulseCtrl,
+            builder: (context, _) {
+              final pulse = 1.0 + (active ? (sin(_pulseCtrl.value * pi * 2) * 0.05) : 0.0);
+              final iconSize = (showLabel ? 22.0 : 30.0) * scale;
+              final iconW = iconWidget ??
+                  Icon(icon, size: iconSize, color: Colors.white.withOpacity(0.95));
+
+              final subText = (sub ?? '').trim();
+              Widget? subRow;
+              if (showSub && subText.isNotEmpty) {
+                subRow = Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      subText,
+                      style: _neon(12 * scale, opacity: 0.92).copyWith(fontWeight: FontWeight.w900),
+                    ),
+                    SizedBox(width: 6 * scale),
+                    const Icon(Icons.diamond, size: 14, color: Color(0xFFB388FF)),
+                  ],
+                );
+              }
+
+              return Transform.scale(
+                scale: pulse,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    iconW,
+                    if (showLabel && label.isNotEmpty) ...[
+                      SizedBox(height: 6 * scale),
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: _neon(12 * scale, opacity: 0.92),
                       ),
                     ],
-                  )
-                : Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      leading,
-                      if (showSub && sub != null) ...[
-                        SizedBox(height: 6 * scale),
-                        FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text(
-                            sub,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: _neon(12.5 * scale, opacity: 0.88),
-                          ),
-                        ),
-                      ],
+                    if (subRow != null) ...[
+                      SizedBox(height: 6 * scale),
+                      subRow,
                     ],
-                  ),
+                  ],
+                ),
+              );
+            },
           ),
         ),
       ),
@@ -1594,7 +1649,6 @@ Widget _buildBoard() {
   }
 
   // ===== Sheets / dialogs =====
-
 
   void _openShopSheet() {
     showModalBottomSheet(
@@ -1848,3 +1902,150 @@ class _VanishFx {
   final int tick;
   const _VanishFx({required this.pos, required this.value, required this.tick});
 }
+
+
+
+class _ComboCard extends StatelessWidget {
+  const _ComboCard({
+    required this.text,
+    required this.shimmerT,
+    required this.particles,
+    required this.particleT,
+  });
+
+  final String text;
+  final AnimationController shimmerT;
+  final List<_Particle> particles;
+  final AnimationController particleT;
+
+  @override
+  Widget build(BuildContext context) {
+    final scale = MediaQuery.of(context).size.shortestSide / 420.0;
+    final font = (44.0 * scale).clamp(38.0, 64.0);
+
+    final card = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0E1A3B).withOpacity(0.92),
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: const Color(0xFF7DF9FF).withOpacity(0.26), width: 1.2),
+        boxShadow: [
+          BoxShadow(color: const Color(0xFF7C4DFF).withOpacity(0.20), blurRadius: 24, spreadRadius: 2),
+          BoxShadow(color: const Color(0xFF00E5FF).withOpacity(0.12), blurRadius: 34, spreadRadius: 4),
+        ],
+      ),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: font,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.5,
+          color: const Color(0xFFEDE7FF),
+          shadows: [
+            Shadow(color: const Color(0xFF7C4DFF).withOpacity(0.85), blurRadius: 22),
+            Shadow(color: const Color(0xFF00E5FF).withOpacity(0.55), blurRadius: 28),
+          ],
+        ),
+      ),
+    );
+
+    return Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.center,
+      children: [
+        _ShimmerFrame(shimmerT: shimmerT, child: card),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: AnimatedBuilder(
+              animation: particleT,
+              builder: (context, _) {
+                return CustomPaint(
+                  painter: _ParticlePainter(particles: particles, t: particleT.value),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+
+class _Particle {
+  _Particle({
+    required this.pos,
+    required this.vel,
+    required this.life,
+    required this.size,
+  });
+
+  Offset pos;
+  Offset vel;
+  double life; // 1 -> 0
+  double size;
+}
+
+class _ParticlePainter extends CustomPainter {
+  const _ParticlePainter({required this.particles, required this.t});
+
+  final List<_Particle> particles;
+  final double t;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (particles.isEmpty) return;
+    for (final p in particles) {
+      final alpha = (255 * p.life.clamp(0.0, 1.0)).toInt();
+      final paint = Paint()
+        ..color = const Color(0xFFB388FF).withAlpha(alpha)
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(p.pos, p.size * (0.6 + 0.4 * p.life), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ParticlePainter oldDelegate) =>
+      oldDelegate.t != t || oldDelegate.particles != particles;
+}
+
+class _ShimmerFrame extends StatelessWidget {
+  const _ShimmerFrame({
+    super.key,
+    required this.child,
+    required this.shimmerT,
+  });
+
+  final Widget child;
+  final AnimationController shimmerT;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: shimmerT,
+      builder: (context, _) {
+        final t = shimmerT.value; // 0..1
+        return ShaderMask(
+          shaderCallback: (rect) {
+            final w = rect.width;
+            final dx = (-w) + (w * 2.2 * t);
+            return const LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                Color(0x00FFFFFF),
+                Color(0x55FFFFFF),
+                Color(0x00FFFFFF),
+              ],
+              stops: [0.35, 0.5, 0.65],
+            ).createShader(Rect.fromLTWH(dx, 0, w * 1.5, rect.height));
+          },
+          blendMode: BlendMode.srcATop,
+          child: child,
+        );
+      },
+    );
+  }
+}
+
