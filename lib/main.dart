@@ -174,6 +174,16 @@ Random _rng = Random();
   late final Animation<double> _toastOpacity;
   late final Animation<double> _toastScale;
 
+  // Premium combo overlay (bigger than toast)
+  String? _combo;
+  Timer? _comboTimer;
+  late final AnimationController _comboCtrl;
+  late final Animation<double> _comboOpacity;
+  late final Animation<double> _comboScale;
+  late final Animation<Offset> _comboSlide;
+  late final Animation<double> _comboRotate;
+
+
 
   AppLang lang = AppLang.en;
 
@@ -262,6 +272,16 @@ Random _rng = Random();
     _toastCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 260));
     _toastOpacity = CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutCubic);
     _toastScale = Tween<double>(begin: 0.92, end: 1.0).animate(CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutBack));
+    _comboCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+    _comboOpacity = CurvedAnimation(parent: _comboCtrl, curve: const Interval(0.0, 0.7, curve: Curves.easeOut));
+    _comboScale = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.60, end: 1.25).chain(CurveTween(curve: Curves.easeOutBack)), weight: 70),
+      TweenSequenceItem(tween: Tween(begin: 1.25, end: 1.00).chain(CurveTween(curve: Curves.easeOutCubic)), weight: 30),
+    ]).animate(_comboCtrl);
+    _comboSlide = Tween<Offset>(begin: const Offset(0, 0.18), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _comboCtrl, curve: const Interval(0.0, 0.9, curve: Curves.easeOutCubic)));
+    _comboRotate = Tween<double>(begin: -0.05, end: 0.0)
+        .animate(CurvedAnimation(parent: _comboCtrl, curve: const Interval(0.0, 0.8, curve: Curves.easeOutCubic)));
     WidgetsBinding.instance.addObserver(this);
 
     // Ensure grid exists immediately to avoid late-init errors.
@@ -292,7 +312,9 @@ Random _rng = Random();
   @override
   void dispose() {
     _toastTimer?.cancel();
+    _comboTimer?.cancel();
     _toastCtrl.dispose();
+    _comboCtrl.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _saveToBlob();
     super.dispose();
@@ -721,7 +743,7 @@ void _collapseAndFill() {
           ? 'SUPER KOMBO!'
           : (lang == AppLang.tr ? 'SÜPER KOMBO!' : 'SUPER COMBO!');
     }
-    _showToast(msg);
+    _showCombo(msg);
   }
 
   void _maybeShowNextLevelReward() {
@@ -879,6 +901,21 @@ void _handleDuplicateTap(Pos p) {
     });
   }
 
+
+  void _showCombo(String msg) {
+    _comboTimer?.cancel();
+    setState(() => _combo = msg);
+    _comboCtrl.forward(from: 0);
+
+    _comboTimer = Timer(const Duration(milliseconds: 1400), () {
+      if (!mounted) return;
+      _comboCtrl.reverse().whenComplete(() {
+        if (!mounted) return;
+        setState(() => _combo = null);
+      });
+    });
+  }
+
   void _playChainNote(int index) {
     // Lightweight, plugin-free feedback. On mobile this is a short click + haptic.
     // (For real piano samples later, swap this out with an audio plugin.)
@@ -999,6 +1036,54 @@ void _handleDuplicateTap(Pos p) {
                           ],
                         ),
                         child: Text(_toast!, style: _neon(15, opacity: 0.98)),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+            if (_combo != null)
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 108,
+                child: Center(
+                  child: FadeTransition(
+                    opacity: _comboOpacity,
+                    child: SlideTransition(
+                      position: _comboSlide,
+                      child: ScaleTransition(
+                        scale: _comboScale,
+                        child: RotationTransition(
+                          turns: _comboRotate,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(22),
+                              gradient: LinearGradient(
+                                colors: [
+                                  const Color(0xFF7C4DFF).withOpacity(0.22),
+                                  const Color(0xFF7DF9FF).withOpacity(0.14),
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              border: Border.all(color: const Color(0xFF7DF9FF).withOpacity(0.35)),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF7DF9FF).withOpacity(0.26),
+                                  blurRadius: 34,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
+                            child: Text(
+                              _combo!,
+                              textAlign: TextAlign.center,
+                              style: _neon(44 * uiScale, opacity: 0.98).copyWith(fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -1335,6 +1420,7 @@ Widget _buildBoard() {
 
 
   Widget _buildBottomBar() {
+  final scale = uiScale;
   return Container(
     padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
     decoration: BoxDecoration(
@@ -1343,62 +1429,69 @@ Widget _buildBoard() {
     ),
     child: Row(
       children: [
-        Expanded(
-          child: _actionButton(
-            icon: swapMode ? Icons.close : Icons.swap_horiz,
-            label: t('swap'),
-            sub: '10 💎',
-            active: swapMode,
-            onTap: _toggleSwap,
-          ),
+        _actionButton(
+          icon: swapMode ? Icons.close : Icons.swap_horiz,
+          label: t('swap'),
+          sub: '10 💎',
+          active: swapMode,
+          onTap: _toggleSwap,
+          showLabel: false,
         ),
         const SizedBox(width: 6),
-        Expanded(
-          child: _actionButton(
-            icon: hammerMode ? Icons.close : Icons.gavel,
-            label: t('hammer'),
-            sub: '7 💎',
-            active: hammerMode,
-            onTap: _toggleHammer,
-          ),
+        _actionButton(
+          icon: hammerMode ? Icons.close : Icons.gavel,
+          label: t('hammer'),
+          sub: '7 💎',
+          active: hammerMode,
+          onTap: _toggleHammer,
+          showLabel: false,
         ),
         const SizedBox(width: 6),
-        Expanded(
-          child: _actionButton(
-            icon: Icons.smart_display,
-            label: t('watchDiamonds'),
-            sub: '+10 💎',
-            active: false,
-            onTap: _watchAdReward,
-          ),
+        _actionButton(
+          icon: Icons.smart_display,
+          label: t('watchDiamonds'),
+          sub: '+10 💎',
+          active: false,
+          onTap: _watchAdReward,
+          showLabel: false,
         ),
         const SizedBox(width: 6),
-        Expanded(
-          child: _actionButton(
-            icon: duplicateMode ? Icons.close : Icons.copy,
-            label: t('duplicate'),
-            sub: '20 💎',
-            active: duplicateMode,
-            onTap: _toggleDuplicate,
-          ),
+        _actionButton(
+          iconWidget: duplicateMode
+              ? Icon(Icons.close, size: 30 * scale, color: Colors.white.withOpacity(0.95))
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('2x', style: _neon(18 * scale, opacity: 0.98).copyWith(fontWeight: FontWeight.w900)),
+                    SizedBox(width: 6 * scale),
+                    Icon(Icons.diamond, size: 22 * scale, color: const Color(0xFFB388FF)),
+                  ],
+                ),
+          label: t('duplicate'),
+          sub: '20 💎',
+          active: duplicateMode,
+          onTap: _toggleDuplicate,
+          showLabel: false,
         ),
         const SizedBox(width: 6),
-        Expanded(
-          child: _actionButton(
-            icon: Icons.shopping_cart,
-            label: t('shop'),
-            sub: '',
-            active: false,
-            onTap: _openShopSheet,
-          ),
+        _actionButton(
+          icon: Icons.shopping_cart,
+          label: t('shop'),
+          sub: '',
+          active: false,
+          onTap: _openShopSheet,
+          showLabel: false,
+          showSub: false,
         ),
       ],
     ),
   );
 }
 
+
   Widget _actionButton({
-    required IconData icon,
+    IconData? icon,
+    Widget? iconWidget,
     required String label,
     String? sub,
     required bool active,
@@ -1410,66 +1503,90 @@ Widget _buildBoard() {
     final scale = uiScale;
     final h = height ?? (74.0 * scale);
 
+    final Widget leading = iconWidget ??
+        Icon(icon ?? Icons.circle, size: (showLabel ? 22 : 30) * scale, color: Colors.white.withOpacity(0.95));
+
     return Expanded(
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
+          duration: const Duration(milliseconds: 140),
           height: h,
           margin: EdgeInsets.symmetric(horizontal: 5 * scale),
           padding: EdgeInsets.symmetric(horizontal: 10 * scale, vertical: 10 * scale),
           decoration: BoxDecoration(
-            color: active ? const Color(0xFF1B2A57).withOpacity(0.90) : const Color(0xFF0E1A3B).withOpacity(0.78),
+            color: active ? const Color(0xFF1B2A57).withOpacity(0.92) : const Color(0xFF0E1A3B).withOpacity(0.78),
             borderRadius: BorderRadius.circular(16 * scale),
             border: Border.all(color: active ? const Color(0xFF7DF9FF).withOpacity(0.60) : Colors.white.withOpacity(0.06)),
             boxShadow: [
               if (active)
                 BoxShadow(
-                  color: const Color(0xFF7DF9FF).withOpacity(0.20),
-                  blurRadius: 18 * scale,
+                  color: const Color(0xFF7DF9FF).withOpacity(0.22),
+                  blurRadius: 20 * scale,
                   spreadRadius: 1,
                 )
             ],
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 22 * scale, color: Colors.white.withOpacity(0.95)),
-              SizedBox(width: 10 * scale),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    if (showLabel)
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: _neon(12 * scale, opacity: 0.96),
-                        ),
-                      ),
-                    if (showSub && sub != null) ...[
-                      SizedBox(height: 4 * scale),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          sub,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: _neon(12 * scale, opacity: 0.86),
+          child: Center(
+            child: showLabel
+                ? Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      leading,
+                      SizedBox(width: 10 * scale),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: _neon(12 * scale, opacity: 0.96),
+                              ),
+                            ),
+                            if (showSub && sub != null) ...[
+                              SizedBox(height: 4 * scale),
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  sub,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: _neon(12 * scale, opacity: 0.86),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                     ],
-                  ],
-                ),
-              ),
-            ],
+                  )
+                : Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      leading,
+                      if (showSub && sub != null) ...[
+                        SizedBox(height: 6 * scale),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            sub,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: _neon(12.5 * scale, opacity: 0.88),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
           ),
         ),
       ),
@@ -1477,6 +1594,7 @@ Widget _buildBoard() {
   }
 
   // ===== Sheets / dialogs =====
+
 
   void _openShopSheet() {
     showModalBottomSheet(
