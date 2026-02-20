@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const MergeBlocksApp());
@@ -37,6 +38,49 @@ class UltraGamePage extends StatefulWidget {
 }
 
 class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateMixin, WidgetsBindingObserver, RestorationMixin {
+
+  // ===== Persistent Save (Robust) =====
+  Future<void> _persistGame() async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = <String, dynamic>{
+      'score': score.toString(),
+      'best': best.toString(),
+      'diamonds': diamonds,
+      'levelIdx': levelIdx,
+      'swaps': swaps,
+      'rows': rows,
+      'cols': cols,
+      'grid': grid
+          .expand((row) => row.map((e) => e?.toString()))
+          .toList(),
+    };
+    await prefs.setString('mbnc_save_v2', jsonEncode(data));
+  }
+
+  Future<void> _loadPersistedGame() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('mbnc_save_v2');
+    if (raw == null) return;
+    try {
+      final Map<String, dynamic> data = jsonDecode(raw);
+      score = BigInt.parse(data['score'] ?? '0');
+      best = BigInt.parse(data['best'] ?? '0');
+      diamonds = data['diamonds'] ?? 0;
+      levelIdx = data['levelIdx'] ?? 1;
+      swaps = data['swaps'] ?? 0;
+
+      final flat = List<String?>.from(data['grid']);
+      grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
+      for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+          final idx = r * cols + c;
+          final v = flat[idx];
+          grid[r][c] = v == null ? null : BigInt.parse(v);
+        }
+      }
+    } catch (_) {}
+  }
+
   // ===== Board config =====
   static const int cols = 5;
   static const int rows = 7;
@@ -283,6 +327,7 @@ Random _rng = Random();
   @override
   void initState() {
     super.initState();
+    _loadPersistedGame();
     _toastCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 260));
     _toastOpacity = CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutCubic);
     _toastScale = Tween<double>(begin: 0.92, end: 1.0).animate(CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutBack));
@@ -314,7 +359,7 @@ Random _rng = Random();
       if (!mounted) return;
       if (!_didRestore && _saveBlob.value == null) {
         _resetBoard(hard: true);
-        _saveToBlob();
+        _saveToBlob(); _persistGame();
       }
     });
   }
@@ -327,7 +372,7 @@ Random _rng = Random();
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
-      _saveToBlob();
+      _saveToBlob(); _persistGame();
     }
   }
 
@@ -346,7 +391,7 @@ Random _rng = Random();
 
 
     WidgetsBinding.instance.removeObserver(this);
-    _saveToBlob();
+    _saveToBlob(); _persistGame();
     super.dispose();
   }
 
@@ -361,7 +406,7 @@ void _resetBoard({required bool hard}) {
       swaps = 0;
     }
     _recalcBest();
-    _saveToBlob();
+    _saveToBlob(); _persistGame();
     setState(() {});
   }
 
@@ -629,7 +674,7 @@ void _applyMergeChain(List<Pos> chain) {
 
   if (pos.length < 2) {
     _clearPath();
-    _saveToBlob();
+    _saveToBlob(); _persistGame();
     setState(() {});
     return;
   }
@@ -810,7 +855,7 @@ void _collapseAndFill() {
     if (_swapFirst == null) {
       _swapFirst = p;
       _showToast('1/2');
-      _saveToBlob();
+      _saveToBlob(); _persistGame();
       setState(() {});
       return;
     }
@@ -856,7 +901,7 @@ void _collapseAndFill() {
     swapMode = false;
     _swapFirst = null;
   }
-  _saveToBlob();
+  _saveToBlob(); _persistGame();
   setState(() {});
 }
 
@@ -874,7 +919,7 @@ void _collapseAndFill() {
     } else {
       hammerMode = false;
     }
-    _saveToBlob();
+    _saveToBlob(); _persistGame();
     setState(() {});
   }
 
@@ -893,7 +938,7 @@ void _toggleDuplicate() {
   } else {
     duplicateMode = false;
   }
-  _saveToBlob();
+  _saveToBlob(); _persistGame();
   setState(() {});
 }
 
@@ -903,14 +948,14 @@ void _handleDuplicateTap(Pos p) {
   grid[p.r][p.c] = v << 1;
   duplicateMode = false;
   _showToast('x2');
-  _saveToBlob();
+  _saveToBlob(); _persistGame();
   setState(() {});
 }
 
   void _watchAdReward() {
   diamonds += 10;
   _showToast('+10 💎');
-  _saveToBlob();
+  _saveToBlob(); _persistGame();
   setState(() {});
 }
 
