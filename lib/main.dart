@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _ShardVanishPainter extends CustomPainter {
   final double t;
@@ -123,25 +124,8 @@ void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
 }
 
 void _saveToBlob() {
-  final flat = <String?>[];
-  for (int r = 0; r < rows; r++) {
-    for (int c = 0; c < cols; c++) {
-      final v = grid[r][c];
-      flat.add(v == null ? null : v.toString());
-    }
-  }
-  final data = <String, dynamic>{
-    'rows': rows,
-    'cols': cols,
-    'grid': flat,
-    'score': score.toString(),
-    'best': best.toString(),
-    'levelIdx': levelIdx,
-    'diamonds': diamonds,
-    'swaps': swaps,
-    'lang': lang.index,
-  };
-  _saveBlob.value = jsonEncode(data);
+  if (!_loaded) return;
+  _saveBlob.value = _encodeStateToJson();
 }
 
   void _startAutoSave() {
@@ -149,7 +133,88 @@ void _saveToBlob() {
     _autoSaveTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!_loaded) return;
       _saveToBlob();
+      _saveToPrefs();
     });
+  }
+
+  String _encodeStateToJson() {
+    final flat = <String?>[];
+    for (final row in grid) {
+      for (final v in row) {
+        flat.add(v?.toString());
+      }
+    }
+    final map = <String, dynamic>{
+      'v': 1,
+      'rows': rows,
+      'cols': cols,
+      'levelIdx': levelIdx,
+      'score': score.toString(),
+      'best': best.toString(),
+      'diamonds': diamonds,
+      'swaps': swaps,
+      'lang': lang.index,
+      'grid': flat,
+      'ts': DateTime.now().millisecondsSinceEpoch,
+    };
+    return jsonEncode(map);
+  }
+
+  Future<void> _saveToPrefs() async {
+    if (!_loaded) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefsKeyV1, _encodeStateToJson());
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  Future<bool> _loadFromPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsKeyV1);
+      if (raw == null || raw.isEmpty) return false;
+      return _tryLoadFromJson(raw);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  bool _tryLoadFromJson(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return false;
+      final r = (decoded['rows'] as num?)?.toInt() ?? rows;
+      final c = (decoded['cols'] as num?)?.toInt() ?? cols;
+      final g = decoded['grid'];
+      if (r != rows || c != cols || g is! List) return false;
+
+      final loadedGrid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
+      int idx = 0;
+      for (int rr = 0; rr < rows; rr++) {
+        for (int cc = 0; cc < cols; cc++) {
+          final s = (idx < g.length ? g[idx] : null);
+          loadedGrid[rr][cc] = (s == null) ? null : BigInt.tryParse('$s');
+          idx++;
+        }
+      }
+
+      // Apply
+      grid = loadedGrid;
+      levelIdx = (decoded['levelIdx'] as num?)?.toInt() ?? 1;
+      score = BigInt.tryParse('${decoded['score']}') ?? BigInt.zero;
+      best = BigInt.tryParse('${decoded['best']}') ?? BigInt.zero;
+      diamonds = (decoded['diamonds'] as num?)?.toInt() ?? 0;
+      swaps = (decoded['swaps'] as num?)?.toInt() ?? 0;
+      final li = (decoded['lang'] as num?)?.toInt() ?? 0;
+      lang = AppLang.values[li.clamp(0, AppLang.values.length - 1)];
+      _clearPath();
+      _recalcBest();
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   bool _loadFromPersisted() {
@@ -251,6 +316,9 @@ Random _rng = Random();
   Timer? _comboTimer;
   Timer? _autoSaveTimer;
   bool _loaded = false;
+
+  // Real, durable persistence (across full app close/reopen)
+  static const String _prefsKeyV1 = 'ultra_merge_save_v1';
   late final AnimationController _comboCtrl;
   late final Animation<double> _comboOpacity;
   late final Animation<double> _comboScale;
@@ -384,12 +452,15 @@ Random _rng = Random();
     // Ensure grid exists immediately to avoid late-init errors.
     grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
 
-    // If no restoration happened, start a new game after first frame.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final ok = _loadFromPersisted();
-      if (!ok) {
+    // Load persistent save first (SharedPreferences), then fallback to restoration blob.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final okPrefs = await _loadFromPrefs();
+      final okRestoration = okPrefs ? false : _loadFromPersisted();
+      if (!okPrefs && !okRestoration) {
         _resetBoard(hard: true);
       }
+      _saveToBlob();
+      await _saveToPrefs();
       _loaded = true;
       _startAutoSave();
       if (mounted) setState(() {});
@@ -405,11 +476,13 @@ Random _rng = Random();
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
       _saveToBlob();
+      _saveToPrefs();
     }
   }
 
   @override
   void dispose() {
+    _autoSaveTimer?.cancel();
     _toastTimer?.cancel();
     _toastCtrl.dispose();
 
@@ -425,6 +498,7 @@ Random _rng = Random();
 
     WidgetsBinding.instance.removeObserver(this);
     _saveToBlob();
+    _saveToPrefs();
     super.dispose();
   }
 
