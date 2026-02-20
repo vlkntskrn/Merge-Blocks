@@ -9,7 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  shared_preferences: ^2.3.2
+  dependencies:
+  shared_preferences: ^2.2.3
 
 flutter:
   uses-material-design: true
