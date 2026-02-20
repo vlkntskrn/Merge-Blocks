@@ -3,64 +3,13 @@ import 'dart:math';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-class _ShardVanishPainter extends CustomPainter {
-  final double t;
-  final int seed;
-  final Color baseColor;
-
-  _ShardVanishPainter({required this.t, required this.seed, required this.baseColor});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rng = Random(seed);
-    final fade = (1.0 - t).clamp(0.0, 1.0);
-    final scale = 1.0 + t * 0.08;
-    canvas.save();
-    canvas.translate(size.width / 2, size.height / 2);
-    canvas.scale(scale, scale);
-    canvas.translate(-size.width / 2, -size.height / 2);
-
-    final shardCount = 10;
-    for (int i = 0; i < shardCount; i++) {
-      final a = rng.nextDouble() * pi * 2;
-      final speed = 10.0 + rng.nextDouble() * 22.0;
-      final driftX = cos(a) * speed * t;
-      final driftY = sin(a) * speed * t + (24.0 * t * t);
-      final w = size.width * (0.10 + rng.nextDouble() * 0.14);
-      final h = size.height * (0.08 + rng.nextDouble() * 0.12);
-      final x = (size.width / 2) - (w / 2) + driftX;
-      final y = (size.height / 2) - (h / 2) + driftY;
-      final rrect = RRect.fromRectAndRadius(Rect.fromLTWH(x, y, w, h), Radius.circular(3));
-
-      final paint = Paint()
-        ..style = PaintingStyle.fill
-        ..color = baseColor.withOpacity((0.35 + rng.nextDouble() * 0.35) * fade);
-      canvas.save();
-      canvas.translate(x + w / 2, y + h / 2);
-      canvas.rotate((rng.nextDouble() * 1.8 - 0.9) * t);
-      canvas.translate(-(x + w / 2), -(y + h / 2));
-      canvas.drawRRect(rrect, paint);
-      canvas.restore();
-    }
-
-    // Soft dust glow
-    final glow = Paint()
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 18)
-      ..color = baseColor.withOpacity(0.22 * fade);
-    canvas.drawCircle(Offset(size.width / 2, size.height / 2), size.shortestSide * (0.28 + 0.10 * t), glow);
-
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(covariant _ShardVanishPainter oldDelegate) {
-    return oldDelegate.t != t || oldDelegate.seed != seed || oldDelegate.baseColor != baseColor;
-  }
-}
-
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Force portrait-only (prevents landscape even if user rotates the device).
+  await SystemChrome.setPreferredOrientations(<DeviceOrientation>[
+    DeviceOrientation.portraitUp,
+  ]);
   runApp(const MergeBlocksApp());
 }
 
@@ -124,105 +73,26 @@ void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
 }
 
 void _saveToBlob() {
-  if (!_loaded) return;
-  _saveBlob.value = _encodeStateToJson();
+  final flat = <String?>[];
+  for (int r = 0; r < rows; r++) {
+    for (int c = 0; c < cols; c++) {
+      final v = grid[r][c];
+      flat.add(v == null ? null : v.toString());
+    }
+  }
+  final data = <String, dynamic>{
+    'rows': rows,
+    'cols': cols,
+    'grid': flat,
+    'score': score.toString(),
+    'best': best.toString(),
+    'levelIdx': levelIdx,
+    'diamonds': diamonds,
+    'swaps': swaps,
+    'lang': lang.index,
+  };
+  _saveBlob.value = jsonEncode(data);
 }
-
-  void _startAutoSave() {
-    _autoSaveTimer?.cancel();
-    _autoSaveTimer = Timer.periodic(const Duration(seconds: 4), (_) {
-      if (!_loaded) return;
-      _saveToBlob();
-      _saveToPrefs();
-    });
-  }
-
-  String _encodeStateToJson() {
-    final flat = <String?>[];
-    for (final row in grid) {
-      for (final v in row) {
-        flat.add(v?.toString());
-      }
-    }
-    final map = <String, dynamic>{
-      'v': 1,
-      'rows': rows,
-      'cols': cols,
-      'levelIdx': levelIdx,
-      'score': score.toString(),
-      'best': best.toString(),
-      'diamonds': diamonds,
-      'swaps': swaps,
-      'lang': lang.index,
-      'grid': flat,
-      'ts': DateTime.now().millisecondsSinceEpoch,
-    };
-    return jsonEncode(map);
-  }
-
-  Future<void> _saveToPrefs() async {
-    if (!_loaded) return;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_prefsKeyV1, _encodeStateToJson());
-    } catch (_) {
-      // ignore
-    }
-  }
-
-  Future<bool> _loadFromPrefs() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_prefsKeyV1);
-      if (raw == null || raw.isEmpty) return false;
-      return _tryLoadFromJson(raw);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  bool _tryLoadFromJson(String raw) {
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map) return false;
-      final r = (decoded['rows'] as num?)?.toInt() ?? rows;
-      final c = (decoded['cols'] as num?)?.toInt() ?? cols;
-      final g = decoded['grid'];
-      if (r != rows || c != cols || g is! List) return false;
-
-      final loadedGrid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
-      int idx = 0;
-      for (int rr = 0; rr < rows; rr++) {
-        for (int cc = 0; cc < cols; cc++) {
-          final s = (idx < g.length ? g[idx] : null);
-          loadedGrid[rr][cc] = (s == null) ? null : BigInt.tryParse('$s');
-          idx++;
-        }
-      }
-
-      // Apply
-      grid = loadedGrid;
-      levelIdx = (decoded['levelIdx'] as num?)?.toInt() ?? 1;
-      score = BigInt.tryParse('${decoded['score']}') ?? BigInt.zero;
-      best = BigInt.tryParse('${decoded['best']}') ?? BigInt.zero;
-      diamonds = (decoded['diamonds'] as num?)?.toInt() ?? 0;
-      swaps = (decoded['swaps'] as num?)?.toInt() ?? 0;
-      final li = (decoded['lang'] as num?)?.toInt() ?? 0;
-      lang = AppLang.values[li.clamp(0, AppLang.values.length - 1)];
-      _clearPath();
-      _recalcBest();
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  bool _loadFromPersisted() {
-    final blob = _saveBlob.value;
-    if (blob == null || blob.isEmpty) return false;
-    _loadFromBlob(blob);
-    return true;
-  }
 
 void _loadFromBlob(String blob) {
   try {
@@ -310,43 +180,13 @@ Random _rng = Random();
   late final Animation<double> _toastScale;
 
 
-
-  // ===== Premium COMBO overlay =====
-  String? _combo;
-  Timer? _comboTimer;
-  Timer? _autoSaveTimer;
-  bool _loaded = false;
-
-  // Real, durable persistence (across full app close/reopen)
-  static const String _prefsKeyV1 = 'ultra_merge_save_v1';
-  late final AnimationController _comboCtrl;
-  late final Animation<double> _comboOpacity;
-  late final Animation<double> _comboScale;
-  late final Animation<Offset> _comboSlide;
-  late final Animation<double> _comboRotate;
-
-  // Shimmer wave for combo card
-  late final AnimationController _shimmerCtrl;
-
-  // Mega combo shake
-  late final AnimationController _shakeCtrl;
-  late final Animation<double> _shakeAnim;
-
-  // Particle burst for mega combo
-  final List<_Particle> _particles = <_Particle>[];
-  late final AnimationController _particleCtrl;
-
-  // Bottom bar pulse
-  late final AnimationController _pulseCtrl;
-
   AppLang lang = AppLang.en;
 
   // ===== Localization =====
   static const Map<String, String> _en = {
     'now': 'NOW',
     'max': 'MAX',
-    'next': 'NEXT',
-    'goal': 'GOAL',
+    'next': 'GOAL',
     'swap': 'SWAP',
     'hammer': 'HAMMER',
     'watchAd': 'AD',
@@ -369,8 +209,7 @@ Random _rng = Random();
   static const Map<String, String> _de = {
     'now': 'JETZT',
     'max': 'MAX',
-    'next': 'NÄCHSTE',
-    'goal': 'ZIEL',
+    'next': 'ZIEL',
     'swap': 'TAUSCH',
     'hammer': 'HAMMER',
     'watchAd': 'WERBUNG',
@@ -393,8 +232,7 @@ Random _rng = Random();
   static const Map<String, String> _tr = {
     'now': 'ŞİMDİ',
     'max': 'EN BÜYÜK',
-    'next': 'SONRAKİ',
-    'goal': 'HEDEF',
+    'next': 'HEDEF',
     'swap': 'TAKAS',
     'hammer': 'TOKMAK',
     'watchAd': 'REKLAM',
@@ -429,41 +267,18 @@ Random _rng = Random();
     _toastCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 260));
     _toastOpacity = CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutCubic);
     _toastScale = Tween<double>(begin: 0.92, end: 1.0).animate(CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutBack));
-
-    // Combo overlay controller
-    _comboCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
-    _comboOpacity = CurvedAnimation(parent: _comboCtrl, curve: Curves.easeOutCubic);
-    _comboScale = Tween<double>(begin: 0.82, end: 1.0).animate(CurvedAnimation(parent: _comboCtrl, curve: Curves.easeOutBack));
-    _comboSlide = Tween<Offset>(begin: const Offset(0, 0.10), end: Offset.zero).animate(CurvedAnimation(parent: _comboCtrl, curve: Curves.easeOutCubic));
-    _comboRotate = Tween<double>(begin: -0.015, end: 0.0).animate(CurvedAnimation(parent: _comboCtrl, curve: Curves.easeOutCubic));
-
-    _shimmerCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
-    _shakeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
-    _shakeAnim = CurvedAnimation(parent: _shakeCtrl, curve: Curves.easeOutCubic);
-
-    _particleCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
-    _particleCtrl.addListener(_tickParticles);
-
-    _pulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
-
-
     WidgetsBinding.instance.addObserver(this);
 
     // Ensure grid exists immediately to avoid late-init errors.
     grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
 
-    // Load persistent save first (SharedPreferences), then fallback to restoration blob.
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final okPrefs = await _loadFromPrefs();
-      final okRestoration = okPrefs ? false : _loadFromPersisted();
-      if (!okPrefs && !okRestoration) {
+    // If no restoration happened, start a new game after first frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_didRestore && _saveBlob.value == null) {
         _resetBoard(hard: true);
+        _saveToBlob();
       }
-      _saveToBlob();
-      await _saveToPrefs();
-      _loaded = true;
-      _startAutoSave();
-      if (mounted) setState(() {});
     });
   }
 
@@ -476,29 +291,15 @@ Random _rng = Random();
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
       _saveToBlob();
-      _saveToPrefs();
     }
   }
 
   @override
   void dispose() {
-    _autoSaveTimer?.cancel();
     _toastTimer?.cancel();
     _toastCtrl.dispose();
-
-    _comboTimer?.cancel();
-    _comboCtrl.dispose();
-    _shimmerCtrl.dispose();
-    _shakeCtrl.dispose();
-    _particleCtrl.removeListener(_tickParticles);
-    _particleCtrl.dispose();
-    _pulseCtrl.dispose();
-    _autoSaveTimer?.cancel();
-
-
     WidgetsBinding.instance.removeObserver(this);
     _saveToBlob();
-    _saveToPrefs();
     super.dispose();
   }
 
@@ -797,8 +598,6 @@ void _applyMergeChain(List<Pos> chain) {
   // Clear all but the final (target) position.
   for (int i = 0; i < pos.length - 1; i++) {
     final p = pos[i];
-    final old = grid[p.r][p.c];
-    if (old != null) _spawnVanishFx(p, old);
     grid[p.r][p.c] = null;
   }
 
@@ -825,21 +624,6 @@ void _applyMergeChain(List<Pos> chain) {
 
 
 
-
-  void _spawnVanishFx(Pos p, BigInt value) {
-    final fx = _VanishFx(
-      pos: p,
-      value: value,
-      tick: _spawnTick,
-      seed: Object.hash(p.r, p.c, value.toString(), _spawnTick),
-    );
-    _vanishFx.add(fx);
-    // Remove automatically a bit later (safety).
-    Future.delayed(const Duration(milliseconds: 520), () {
-      if (!mounted) return;
-      setState(() => _vanishFx.remove(fx));
-    });
-  }
 void _cascadeFrom(Pos start) {
   // Chain merge (no collapse during cascade):
   // While the tile has an equal neighbour (8-direction), merge pairwise into this tile.
@@ -864,8 +648,6 @@ void _cascadeFrom(Pos start) {
     if (neighborSame == null) return;
 
     // Consume neighbour into current.
-    final gone = grid[neighborSame.r][neighborSame.c];
-    if (gone != null) _spawnVanishFx(neighborSame, gone);
     grid[neighborSame.r][neighborSame.c] = null;
     final newV = v * BigInt.from(2);
     grid[cur.r][cur.c] = newV;
@@ -944,7 +726,7 @@ void _collapseAndFill() {
           ? 'SUPER KOMBO!'
           : (lang == AppLang.tr ? 'SÜPER KOMBO!' : 'SUPER COMBO!');
     }
-    _showComboOverlay(msg, merges: merges);
+    _showToast(msg);
   }
 
   void _maybeShowNextLevelReward() {
@@ -1102,57 +884,6 @@ void _handleDuplicateTap(Pos p) {
     });
   }
 
-
-  void _showComboOverlay(String msg, {required int merges}) {
-    _comboTimer?.cancel();
-    setState(() => _combo = msg);
-    _comboCtrl.forward(from: 0);
-
-    if (merges >= 11) {
-      if (!_shakeCtrl.isAnimating) _shakeCtrl.forward(from: 0);
-      _spawnParticles();
-      HapticFeedback.mediumImpact();
-    }
-
-    _comboTimer = Timer(const Duration(milliseconds: 1100), () {
-      if (!mounted) return;
-      _comboCtrl.reverse().whenComplete(() {
-        if (!mounted) return;
-        setState(() => _combo = null);
-      });
-    });
-  }
-
-  void _spawnParticles() {
-    _particles.clear();
-    final rnd = Random();
-    for (int i = 0; i < 22; i++) {
-      final ang = rnd.nextDouble() * pi * 2;
-      final spd = 40 + rnd.nextDouble() * 120;
-      final vel = Offset(cos(ang) * spd, sin(ang) * spd);
-      _particles.add(_Particle(
-        pos: Offset(rnd.nextDouble() * 8 - 4, rnd.nextDouble() * 8 - 4),
-        vel: vel,
-        life: 1.0,
-        size: 2.2 + rnd.nextDouble() * 2.8,
-      ));
-    }
-    _particleCtrl.forward(from: 0);
-  }
-
-  void _tickParticles() {
-    if (_particles.isEmpty) return;
-    const dt = 1 / 60.0;
-    for (final p in _particles) {
-      p.pos += p.vel * dt;
-      p.vel = Offset(p.vel.dx * 0.96, (p.vel.dy * 0.96) + 18 * dt);
-      p.life -= dt * 1.2;
-    }
-    _particles.removeWhere((p) => p.life <= 0);
-    if (mounted) setState(() {});
-  }
-
-
   void _playChainNote(int index) {
     // Lightweight, plugin-free feedback. On mobile this is a short click + haptic.
     // (For real piano samples later, swap this out with an audio plugin.)
@@ -1229,8 +960,7 @@ void _handleDuplicateTap(Pos p) {
     final curMax = _maxOnBoard();
     final bestLocal = best;
     final nowLabel = _fmtBig(curMax);
-    final nextValue = (curMax <= BigInt.zero) ? BigInt.from(2) : (curMax << 1);
-    final nextLabel = _fmtBig(nextValue);
+    final maxLabel = _fmtBig(bestLocal);
     final goalLabel = _fmtBig(goal);
     final ratio = goal == BigInt.zero ? 0.0 : min(1.0, curMax.toDouble() / goal.toDouble());
 
@@ -1242,7 +972,7 @@ void _handleDuplicateTap(Pos p) {
           children: [
             Column(
               children: [
-                _buildHeader(nowLabel: nowLabel, nextLabel: nextLabel, goalLabel: goalLabel, ratio: ratio),
+                _buildHeader(nowLabel: nowLabel, maxLabel: maxLabel, goalLabel: goalLabel, ratio: ratio),
                 const SizedBox(height: 10),
                 Expanded(child: _buildBoard()),
                 const SizedBox(height: 6),
@@ -1279,44 +1009,7 @@ void _handleDuplicateTap(Pos p) {
                   ),
                 ),
               ),
-          
-            // Premium COMBO overlay (center)
-            if (_combo != null)
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: Center(
-                    child: FadeTransition(
-                      opacity: _comboOpacity,
-                      child: SlideTransition(
-                        position: _comboSlide,
-                        child: ScaleTransition(
-                          scale: _comboScale,
-                          child: RotationTransition(
-                            turns: _comboRotate,
-                            child: AnimatedBuilder(
-                              animation: _shakeAnim,
-                              builder: (context, child) {
-                                if (!_shakeCtrl.isAnimating) return child!;
-                                final mag = 10.0 * (1.0 - _shakeAnim.value);
-                                final dx = sin(_shakeAnim.value * pi * 10) * mag;
-                                final dy = cos(_shakeAnim.value * pi * 12) * mag;
-                                return Transform.translate(offset: Offset(dx, dy), child: child);
-                              },
-                              child: _ComboCard(
-                                text: _combo!,
-                                shimmerT: _shimmerCtrl,
-                                particles: _particles,
-                                particleT: _particleCtrl,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-],
+          ],
         ),
       ),
       bottomNavigationBar: SafeArea(
@@ -1361,7 +1054,7 @@ void _handleDuplicateTap(Pos p) {
 
   Widget _buildHeader({
     required String nowLabel,
-    required String nextLabel,
+    required String maxLabel,
     required String goalLabel,
     required double ratio,
   }) {
@@ -1405,9 +1098,9 @@ void _handleDuplicateTap(Pos p) {
             children: [
               Expanded(child: _miniStatChip(t('now'), nowLabel)),
               const SizedBox(width: 10),
-              Expanded(child: _miniStatChip(t('max'), nextLabel)),
+              Expanded(child: _miniStatChip(t('max'), maxLabel)),
               const SizedBox(width: 10),
-              Expanded(child: _miniStatChip(t('goal'), goalLabel)),
+              Expanded(child: _miniStatChip(t('next'), goalLabel)),
             ],
           ),
           const SizedBox(height: 10),
@@ -1576,27 +1269,8 @@ Widget _buildBoard() {
   // Premium merge vanish FX overlay (safe stub).
   // If you later want a richer effect, we can animate opacity/scale here.
   Widget _vanishFxWidget(_VanishFx fx, double size) {
-    return TweenAnimationBuilder<double>(
-      key: ValueKey('vanish_${fx.pos.r}_${fx.pos.c}_${fx.tick}_${fx.seed}'),
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: const Duration(milliseconds: 420),
-      curve: Curves.easeOutCubic,
-      onEnd: () {
-        if (!mounted) return;
-        setState(() => _vanishFx.remove(fx));
-      },
-      builder: (context, t, _) {
-        return CustomPaint(
-          painter: _ShardVanishPainter(
-            t: t,
-            seed: fx.seed,
-            baseColor: _tileColor(fx.value),
-          ),
-        );
-      },
-    );
+    return const SizedBox.shrink();
   }
-
 
 
 
@@ -1677,70 +1351,50 @@ Widget _buildBoard() {
         Expanded(
           child: _actionButton(
             icon: swapMode ? Icons.close : Icons.swap_horiz,
-            label: '',
-            sub: '10',
+            label: t('swap'),
+            sub: '10 💎',
             active: swapMode,
             onTap: _toggleSwap,
-            showLabel: false,
-            showSub: true,
           ),
         ),
         const SizedBox(width: 6),
         Expanded(
           child: _actionButton(
             icon: hammerMode ? Icons.close : Icons.gavel,
-            label: '',
-            sub: '7',
+            label: t('hammer'),
+            sub: '7 💎',
             active: hammerMode,
             onTap: _toggleHammer,
-            showLabel: false,
-            showSub: true,
           ),
         ),
         const SizedBox(width: 6),
         Expanded(
           child: _actionButton(
             icon: Icons.smart_display,
-            label: '',
-            sub: '+10',
+            label: t('watchDiamonds'),
+            sub: '+10 💎',
             active: false,
             onTap: _watchAdReward,
-            showLabel: false,
-            showSub: true,
           ),
         ),
         const SizedBox(width: 6),
         Expanded(
           child: _actionButton(
             icon: duplicateMode ? Icons.close : Icons.copy,
-            iconWidget: duplicateMode
-                ? null
-                : Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Text('2x', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
-                      SizedBox(width: 6),
-                      Icon(Icons.diamond, size: 20, color: Color(0xFFB388FF)),
-                    ],
-                  ),
-            label: '',
-            sub: '20',
+            label: t('duplicate'),
+            sub: '20 💎',
             active: duplicateMode,
             onTap: _toggleDuplicate,
-            showLabel: false,
-            showSub: true,
           ),
         ),
         const SizedBox(width: 6),
         Expanded(
           child: _actionButton(
             icon: Icons.shopping_cart,
-            label: '',
+            label: t('shop'),
             sub: '',
             active: false,
             onTap: _openShopSheet,
-            showLabel: false,
-            showSub: false,
           ),
         ),
       ],
@@ -1748,10 +1402,8 @@ Widget _buildBoard() {
   );
 }
 
-
   Widget _actionButton({
     required IconData icon,
-    Widget? iconWidget,
     required String label,
     String? sub,
     required bool active,
@@ -1785,54 +1437,44 @@ Widget _buildBoard() {
                 )
             ],
           ),
-          child: AnimatedBuilder(
-            animation: _pulseCtrl,
-            builder: (context, _) {
-              final pulse = 1.0 + (active ? (sin(_pulseCtrl.value * pi * 2) * 0.05) : 0.0);
-              final iconSize = (showLabel ? 22.0 : 30.0) * scale;
-              final iconW = iconWidget ??
-                  Icon(icon, size: iconSize, color: Colors.white.withOpacity(0.95));
-
-              final subText = (sub ?? '').trim();
-              Widget? subRow;
-              if (showSub && subText.isNotEmpty) {
-                subRow = Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      subText,
-                      style: _neon(12 * scale, opacity: 0.92).copyWith(fontWeight: FontWeight.w900),
-                    ),
-                    SizedBox(width: 6 * scale),
-                    const Icon(Icons.diamond, size: 14, color: Color(0xFFB388FF)),
-                  ],
-                );
-              }
-
-              return Transform.scale(
-                scale: pulse,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 22 * scale, color: Colors.white.withOpacity(0.95)),
+              SizedBox(width: 10 * scale),
+              Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    iconW,
-                    if (showLabel && label.isNotEmpty) ...[
-                      SizedBox(height: 6 * scale),
-                      Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: _neon(12 * scale, opacity: 0.92),
+                    if (showLabel)
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: _neon(12 * scale, opacity: 0.96),
+                        ),
                       ),
-                    ],
-                    if (subRow != null) ...[
-                      SizedBox(height: 6 * scale),
-                      subRow,
+                    if (showSub && sub != null) ...[
+                      SizedBox(height: 4 * scale),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          sub,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: _neon(12 * scale, opacity: 0.86),
+                        ),
+                      ),
                     ],
                   ],
                 ),
-              );
-            },
+              ),
+            ],
           ),
         ),
       ),
@@ -2091,152 +1733,5 @@ class _VanishFx {
   final Pos pos;
   final BigInt value;
   final int tick;
-  final int seed;
-  const _VanishFx({required this.pos, required this.value, required this.tick, required this.seed});
-}
-
-
-
-class _ComboCard extends StatelessWidget {
-  const _ComboCard({
-    required this.text,
-    required this.shimmerT,
-    required this.particles,
-    required this.particleT,
-  });
-
-  final String text;
-  final AnimationController shimmerT;
-  final List<_Particle> particles;
-  final AnimationController particleT;
-
-  @override
-  Widget build(BuildContext context) {
-    final scale = MediaQuery.of(context).size.shortestSide / 420.0;
-    final font = (44.0 * scale).clamp(38.0, 64.0);
-
-    final card = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0E1A3B).withOpacity(0.92),
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: const Color(0xFF7DF9FF).withOpacity(0.26), width: 1.2),
-        boxShadow: [
-          BoxShadow(color: const Color(0xFF7C4DFF).withOpacity(0.20), blurRadius: 24, spreadRadius: 2),
-          BoxShadow(color: const Color(0xFF00E5FF).withOpacity(0.12), blurRadius: 34, spreadRadius: 4),
-        ],
-      ),
-      child: Text(
-        text,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: font,
-          fontWeight: FontWeight.w900,
-          letterSpacing: 0.5,
-          color: const Color(0xFFEDE7FF),
-          shadows: [
-            Shadow(color: const Color(0xFF7C4DFF).withOpacity(0.85), blurRadius: 22),
-            Shadow(color: const Color(0xFF00E5FF).withOpacity(0.55), blurRadius: 28),
-          ],
-        ),
-      ),
-    );
-
-    return Stack(
-      clipBehavior: Clip.none,
-      alignment: Alignment.center,
-      children: [
-        _ShimmerFrame(shimmerT: shimmerT, child: card),
-        Positioned.fill(
-          child: IgnorePointer(
-            child: AnimatedBuilder(
-              animation: particleT,
-              builder: (context, _) {
-                return CustomPaint(
-                  painter: _ParticlePainter(particles: particles, t: particleT.value),
-                );
-              },
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-
-class _Particle {
-  _Particle({
-    required this.pos,
-    required this.vel,
-    required this.life,
-    required this.size,
-  });
-
-  Offset pos;
-  Offset vel;
-  double life; // 1 -> 0
-  double size;
-}
-
-class _ParticlePainter extends CustomPainter {
-  const _ParticlePainter({required this.particles, required this.t});
-
-  final List<_Particle> particles;
-  final double t;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (particles.isEmpty) return;
-    for (final p in particles) {
-      final alpha = (255 * p.life.clamp(0.0, 1.0)).toInt();
-      final paint = Paint()
-        ..color = const Color(0xFFB388FF).withAlpha(alpha)
-        ..style = PaintingStyle.fill;
-      canvas.drawCircle(p.pos, p.size * (0.6 + 0.4 * p.life), paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _ParticlePainter oldDelegate) =>
-      oldDelegate.t != t || oldDelegate.particles != particles;
-}
-
-class _ShimmerFrame extends StatelessWidget {
-  const _ShimmerFrame({
-    super.key,
-    required this.child,
-    required this.shimmerT,
-  });
-
-  final Widget child;
-  final AnimationController shimmerT;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: shimmerT,
-      builder: (context, _) {
-        final t = shimmerT.value; // 0..1
-        return ShaderMask(
-          shaderCallback: (rect) {
-            final w = rect.width;
-            final dx = (-w) + (w * 2.2 * t);
-            return const LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              colors: [
-                Color(0x00FFFFFF),
-                Color(0x55FFFFFF),
-                Color(0x00FFFFFF),
-              ],
-              stops: [0.35, 0.5, 0.65],
-            ).createShader(Rect.fromLTWH(dx, 0, w * 1.5, rect.height));
-          },
-          blendMode: BlendMode.srcATop,
-          child: child,
-        );
-      },
-    );
-  }
+  const _VanishFx({required this.pos, required this.value, required this.tick});
 }
