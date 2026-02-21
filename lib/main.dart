@@ -8,6 +8,14 @@ import 'package:flutter/services.dart';
 
 const String _prefsKeyV1 = 'merge_blocks_save_v1';
 
+class _GemFlyFx {
+  _GemFlyFx({required this.id, required this.from, required this.to, required this.startMs});
+  final int id;
+  final Offset from;
+  final Offset to;
+  final int startMs;
+}
+
 
 class _LevelUpBurstPainter extends CustomPainter {
   final double t;
@@ -285,6 +293,13 @@ Random _rng = Random();
   late final AnimationController _comboCtrl;
   late final AnimationController _shakeCtrl;
   late final AnimationController _shimmerCtrl;
+  Timer? _comboTimer;
+  String? _comboMsg;
+
+  final GlobalKey _diamondCounterKey = GlobalKey();
+  final List<_GemFlyFx> _gemFlyFx = <_GemFlyFx>[];
+  int _gemFxId = 0;
+  Timer? _gemAwardTicker;
 
   AppLang lang = AppLang.en;
 
@@ -811,19 +826,22 @@ void _collapseAndFill() {
 
     String msg;
     if (merges >= 11) {
-      diamonds += 1;
       msg = lang == AppLang.de ? 'MEGA KOMBO! +1 💎' : 'MEGA COMBO! +1 💎';
+      _animateDiamondGain(1);
     } else if (merges >= 8) {
       msg = lang == AppLang.de ? 'TOLLE KOMBO!' : 'AWESOME COMBO!';
     } else {
       msg = lang == AppLang.de ? 'SUPER KOMBO!' : 'SUPER COMBO!';
     }
+
+    _showComboFx(msg, merges: merges);
     _showToast(msg);
   }
 
   void _maybeShowNextLevelReward() {
-    // Phase 2 rewarded flow is not wired in this DartPad-safe build.
-    // Kept as no-op so we don't break existing call sites.
+    // Premium feel: level progression grants a small diamond reward.
+    _animateDiamondGain(3);
+    _showToast(lang == AppLang.de ? '+3 💎 LEVEL BONUS' : '+3 💎 LEVEL BONUS');
   }
 
   void _saveGame() {
@@ -952,11 +970,11 @@ void _handleDuplicateTap(Pos p) {
 }
 
   void _watchAdReward() {
-  diamonds += 10;
-  _showToast('+10 💎');
-  _saveToBlob();
-  setState(() {});
-}
+    _animateDiamondGain(10);
+    _showToast('+10 💎');
+    _saveToBlob();
+    setState(() {});
+  }
 
   // ===== UI helpers =====
 
@@ -986,6 +1004,84 @@ void _handleDuplicateTap(Pos p) {
       _levelCtrl.reverse().whenComplete(() {
         if (!mounted) return;
         setState(() => _levelMsg = null);
+      });
+    });
+
+    setState(() {});
+  }
+
+  void _showComboFx(String msg, {required int merges}) {
+    _comboTimer?.cancel();
+    _comboMsg = msg;
+    _comboCtrl.forward(from: 0);
+    _shakeCtrl.forward(from: 0);
+    _shimmerCtrl.repeat(reverse: true);
+
+    _comboTimer = Timer(const Duration(milliseconds: 1100), () {
+      if (!mounted) return;
+      _comboCtrl.reverse().whenComplete(() {
+        if (!mounted) return;
+        setState(() => _comboMsg = null);
+      });
+      _shimmerCtrl.stop();
+      _shimmerCtrl.value = 0;
+    });
+
+    setState(() {});
+  }
+
+  Offset _diamondCounterCenterGlobal() {
+    final ctx = _diamondCounterKey.currentContext;
+    if (ctx == null) return const Offset(56, 40);
+    final box = ctx.findRenderObject();
+    if (box is RenderBox) {
+      final p = box.localToGlobal(Offset.zero);
+      return p + Offset(box.size.width * 0.5, box.size.height * 0.5);
+    }
+    return const Offset(56, 40);
+  }
+
+  void _animateDiamondGain(int amount) {
+    if (amount <= 0) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final target = _diamondCounterCenterGlobal();
+    final media = MediaQuery.of(context);
+    final fromBase = Offset(media.size.width * 0.5, media.padding.top + 140);
+    final rng = Random();
+    for (int i = 0; i < amount; i++) {
+      final jitter = Offset((rng.nextDouble() - 0.5) * 80, (rng.nextDouble() - 0.5) * 46);
+      _gemFlyFx.add(_GemFlyFx(
+        id: _gemFxId++,
+        from: fromBase + jitter,
+        to: target,
+        startMs: now + i * 90,
+      ));
+    }
+
+    _gemAwardTicker?.cancel();
+    int remaining = amount;
+    _gemAwardTicker = Timer.periodic(const Duration(milliseconds: 90), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() {
+        diamonds += 1;
+      });
+      if (remaining == amount) {
+        HapticFeedback.selectionClick();
+      }
+      remaining -= 1;
+      if (remaining <= 0) {
+        timer.cancel();
+        _saveGame();
+      }
+    });
+
+    Future.delayed(Duration(milliseconds: amount * 90 + 850), () {
+      if (!mounted) return;
+      setState(() {
+        _gemFlyFx.clear();
       });
     });
 
@@ -1127,6 +1223,121 @@ void _handleDuplicateTap(Pos p) {
                 ),
               ),
 
+            if (_comboMsg != null)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: AnimatedBuilder(
+                    animation: Listenable.merge([_comboCtrl, _shakeCtrl, _shimmerCtrl]),
+                    builder: (context, _) {
+                      final t = Curves.easeOutCubic.transform(_comboCtrl.value.clamp(0.0, 1.0));
+                      final pulse = 1.0 + 0.14 * sin(_shimmerCtrl.value * pi * 2);
+                      final dx = sin(_shakeCtrl.value * pi * 6) * (1.0 - _shakeCtrl.value) * 18.0;
+                      return Opacity(
+                        opacity: (1.0 - (_comboCtrl.status == AnimationStatus.reverse ? (1 - t) : 0)).clamp(0.0, 1.0),
+                        child: Center(
+                          child: Transform.translate(
+                            offset: Offset(dx, -40 - 22 * (1 - t)),
+                            child: Transform.scale(
+                              scale: (0.9 + (t * 2.6)) * pulse,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(24),
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      const Color(0x9927E6FF),
+                                      const Color(0xCC8A5BFF),
+                                      const Color(0x99FF4D8D),
+                                    ],
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFF27E6FF).withOpacity(0.35),
+                                      blurRadius: 26,
+                                      spreadRadius: 6,
+                                    ),
+                                    BoxShadow(
+                                      color: const Color(0xFF8A5BFF).withOpacity(0.35),
+                                      blurRadius: 36,
+                                      spreadRadius: 10,
+                                    ),
+                                  ],
+                                  border: Border.all(color: Colors.white.withOpacity(0.65), width: 1.4),
+                                ),
+                                child: Text(
+                                  _comboMsg ?? '',
+                                  textAlign: TextAlign.center,
+                                  style: _neon(16, opacity: 1.0),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+
+            ..._gemFlyFx.map((fx) => Positioned.fill(
+                  child: IgnorePointer(
+                    child: TweenAnimationBuilder<double>(
+                      key: ValueKey('gemfx_${fx.id}'),
+                      tween: Tween(begin: 0, end: 1),
+                      duration: Duration(
+                        milliseconds: max(700, (fx.startMs - DateTime.now().millisecondsSinceEpoch) + 700),
+                      ),
+                      curve: Curves.easeInOutCubic,
+                      builder: (context, t, _) {
+                        final now = DateTime.now().millisecondsSinceEpoch;
+                        final delay = fx.startMs - now;
+                        if (delay > 0) return const SizedBox.shrink();
+                        final p = ((-delay) / 700).clamp(0.0, 1.0).toDouble();
+                        final arcY = sin(p * pi) * -60;
+                        final pos = Offset.lerp(fx.from, fx.to, p)! + Offset(0, arcY);
+                        final s = 0.65 + (1 - p) * 0.65;
+                        return Stack(
+                          children: [
+                            Positioned(
+                              left: pos.dx - 12,
+                              top: pos.dy - 12,
+                              child: Transform.rotate(
+                                angle: p * pi * 4,
+                                child: Transform.scale(
+                                  scale: s,
+                                  child: Container(
+                                    width: 24,
+                                    height: 24,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      gradient: RadialGradient(
+                                        colors: [
+                                          const Color(0xFFFFF59D),
+                                          const Color(0xFFFFD54F),
+                                          const Color(0xFFB388FF),
+                                        ],
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: const Color(0xFFFFD54F).withOpacity(0.45),
+                                          blurRadius: 16,
+                                          spreadRadius: 3,
+                                        ),
+                                      ],
+                                      border: Border.all(color: Colors.white.withOpacity(0.75), width: 1),
+                                    ),
+                                    child: const Icon(Icons.diamond, size: 13, color: Color(0xFF1A1037)),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                )),
+
             if (_levelMsg != null)
               Positioned.fill(
                 child: IgnorePointer(
@@ -1143,8 +1354,8 @@ void _handleDuplicateTap(Pos p) {
                           child: Transform.scale(
                             scale: scale,
                             child: SizedBox(
-                              width: 140,
-                              height: 140,
+                              width: 360,
+                              height: 360,
                               child: Stack(
                                 alignment: Alignment.center,
                                 children: [
@@ -1157,8 +1368,8 @@ void _handleDuplicateTap(Pos p) {
                                     ),
                                   ),
                                   Container(
-                                    width: 116,
-                                    height: 116,
+                                    width: 300,
+                                    height: 300,
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
                                       gradient: RadialGradient(
@@ -1189,9 +1400,9 @@ void _handleDuplicateTap(Pos p) {
                                   Column(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Text('LEVEL UP', style: _neon(10, opacity: 0.95)),
+                                      Text('LEVEL UP', style: _neon(24, opacity: 0.98)),
                                       const SizedBox(height: 2),
-                                      Text('LV $levelIdx', style: _neon(18, opacity: 1.0)),
+                                      Text('LV $levelIdx', style: _neon(48, opacity: 1.0)),
                                     ],
                                   ),
                                 ],
@@ -1260,6 +1471,7 @@ void _handleDuplicateTap(Pos p) {
           Row(
             children: [
               _pill(
+                key: _diamondCounterKey,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1313,8 +1525,9 @@ void _handleDuplicateTap(Pos p) {
     );
   }
 
-  Widget _pill({required Widget child}) {
+  Widget _pill({Key? key, required Widget child}) {
     return Container(
+      key: key,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.08),
@@ -1609,7 +1822,7 @@ Widget _buildBoard() {
     required bool active,
     required VoidCallback onTap,
     double? height,
-    bool showLabel = true,
+    bool showLabel = false,
     bool showSub = true,
   }) {
     final scale = uiScale;
@@ -1671,7 +1884,7 @@ Widget _buildBoard() {
             ],
           ),
         ),
-    );
+      );
   }
 
   // ===== Sheets / dialogs =====
@@ -1703,8 +1916,8 @@ Widget _buildBoard() {
                   padding: const EdgeInsets.only(bottom: 10),
                   child: GestureDetector(
                     onTap: () {
-                      setState(() => diamonds += gems);
                       Navigator.pop(ctx);
+                      _animateDiamondGain(gems);
                       _showToast('+$gems 💎');
                     },
                     child: Container(
