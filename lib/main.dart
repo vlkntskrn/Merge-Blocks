@@ -1402,6 +1402,7 @@ Widget _buildBoard() {
   );
 }
 
+  
   Widget _actionButton({
     required IconData icon,
     required String label,
@@ -1413,67 +1414,57 @@ Widget _buildBoard() {
     bool showSub = true,
   }) {
     final scale = uiScale;
-    final h = height ?? (74.0 * scale);
 
-    return Expanded(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          height: h,
-          margin: EdgeInsets.symmetric(horizontal: 5 * scale),
-          padding: EdgeInsets.symmetric(horizontal: 10 * scale, vertical: 10 * scale),
-          decoration: BoxDecoration(
-            color: active ? const Color(0xFF1B2A57).withOpacity(0.90) : const Color(0xFF0E1A3B).withOpacity(0.78),
-            borderRadius: BorderRadius.circular(16 * scale),
-            border: Border.all(color: active ? const Color(0xFF7DF9FF).withOpacity(0.60) : Colors.white.withOpacity(0.06)),
-            boxShadow: [
-              if (active)
-                BoxShadow(
-                  color: const Color(0xFF7DF9FF).withOpacity(0.20),
-                  blurRadius: 18 * scale,
-                  spreadRadius: 1,
-                )
-            ],
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 22 * scale, color: Colors.white.withOpacity(0.95)),
-              SizedBox(width: 10 * scale),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    if (showLabel)
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: _neon(12 * scale, opacity: 0.96),
-                        ),
-                      ),
-                    if (showSub && sub != null) ...[
-                      SizedBox(height: 4 * scale),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          sub,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: _neon(12 * scale, opacity: 0.86),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+    // Bigger, finger-friendly controls for portrait phones.
+    final h = height ?? (90.0 * scale).clamp(82.0, 104.0);
+    final iconSize = (32.0 * scale).clamp(26.0, 38.0);
+    final hasSub = sub != null && sub!.trim().isNotEmpty;
+
+    final borderColor = (active ? Colors.white : Colors.white.withOpacity(0.22));
+    final bg = Colors.black.withOpacity(active ? 0.56 : 0.40);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
+        height: h,
+        padding: EdgeInsets.symmetric(horizontal: 10.0 * scale, vertical: 10.0 * scale),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          color: bg,
+          border: Border.all(color: borderColor, width: 1.6),
+          boxShadow: [
+            if (active)
+              BoxShadow(
+                color: Colors.white.withOpacity(0.18),
+                blurRadius: 18,
+                spreadRadius: 1,
               ),
+          ],
+        ),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: iconSize, color: Colors.white.withOpacity(0.96)),
+              if (showLabel) SizedBox(height: 6.0 * scale),
+              if (showLabel)
+                Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _neon((13.0 * scale).clamp(12.0, 16.0), opacity: 0.95),
+                ),
+              if (showSub && hasSub) SizedBox(height: 2.0 * scale),
+              if (showSub && hasSub)
+                Text(
+                  sub!,
+                  textAlign: TextAlign.center,
+                  style: _neon((11.0 * scale).clamp(10.0, 13.0), opacity: 0.72),
+                ),
             ],
           ),
         ),
@@ -1481,9 +1472,7 @@ Widget _buildBoard() {
     );
   }
 
-  // ===== Sheets / dialogs =====
-
-  void _openShopSheet() {
+void _openShopSheet() {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF06102C),
