@@ -8,14 +8,6 @@ import 'package:flutter/services.dart';
 
 const String _prefsKeyV1 = 'merge_blocks_save_v1';
 
-class _GemFlyFx {
-  _GemFlyFx({required this.id, required this.from, required this.to, required this.startMs});
-  final int id;
-  final Offset from;
-  final Offset to;
-  final int startMs;
-}
-
 
 class _LevelUpBurstPainter extends CustomPainter {
   final double t;
@@ -62,6 +54,20 @@ class _LevelUpBurstPainter extends CustomPainter {
 }
 
 
+class _GemFlyFx {
+  final int id;
+  final Offset from;
+  final Offset to;
+  final int startMs;
+
+  const _GemFlyFx({
+    required this.id,
+    required this.from,
+    required this.to,
+    required this.startMs,
+  });
+}
+
 void main() {
   runApp(const MergeBlocksApp());
 }
@@ -104,6 +110,17 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   late final AnimationController _levelCtrl;
   Timer? _levelTimer;
   String? _levelMsg;
+
+  // Combo + diamond fly FX
+  late final AnimationController _comboCtrl;
+  late final AnimationController _shakeCtrl;
+  late final AnimationController _shimmerCtrl;
+  Timer? _comboTimer;
+  String? _comboMsg;
+  final GlobalKey _diamondCounterKey = GlobalKey();
+  final List<_GemFlyFx> _gemFlyFx = <_GemFlyFx>[];
+  int _gemFxId = 0;
+  Timer? _gemAwardTicker;
 
   // ===== Board config =====
   static const int cols = 5;
@@ -290,16 +307,7 @@ Random _rng = Random();
   late final AnimationController _toastCtrl;
   late final Animation<double> _toastOpacity;
   late final Animation<double> _toastScale;
-  late final AnimationController _comboCtrl;
-  late final AnimationController _shakeCtrl;
-  late final AnimationController _shimmerCtrl;
-  Timer? _comboTimer;
-  String? _comboMsg;
 
-  final GlobalKey _diamondCounterKey = GlobalKey();
-  final List<_GemFlyFx> _gemFlyFx = <_GemFlyFx>[];
-  int _gemFxId = 0;
-  Timer? _gemAwardTicker;
 
   AppLang lang = AppLang.en;
 
@@ -364,13 +372,11 @@ Random _rng = Random();
     WidgetsBinding.instance.addObserver(this);
 
     _toastCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
-    _toastOpacity = CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOut, reverseCurve: Curves.easeIn);
-    _toastScale = Tween<double>(begin: 0.92, end: 1.0).animate(CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutBack, reverseCurve: Curves.easeIn));
     _comboCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
     _shakeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
     _shimmerCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
 
-    _levelCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200));
+    _levelCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
 
     () async {
       final okPrefs = await _loadFromPrefs();
@@ -407,6 +413,8 @@ Random _rng = Random();
     _autoSaveTimer?.cancel();
     _levelTimer?.cancel();
     _toastCtrl.dispose();
+    _comboTimer?.cancel();
+    _gemAwardTicker?.cancel();
     _comboCtrl.dispose();
     _shakeCtrl.dispose();
     _shimmerCtrl.dispose();
@@ -822,41 +830,38 @@ void _collapseAndFill() {
   void _handleCombo(int merges) {
     _lastCombo = merges;
     _playMergeMelody(merges);
-    if (merges < 5) return;
-
-    String msg;
     if (merges >= 11) {
-      msg = lang == AppLang.de ? 'MEGA KOMBO! +1 💎' : 'MEGA COMBO! +1 💎';
+      _showComboFx(lang == AppLang.de ? 'MEGA KOMBO!' : 'MEGA COMBO!');
       _animateDiamondGain(1);
-    } else if (merges >= 8) {
-      msg = lang == AppLang.de ? 'TOLLE KOMBO!' : 'AWESOME COMBO!';
-    } else {
-      msg = lang == AppLang.de ? 'SUPER KOMBO!' : 'SUPER COMBO!';
+      _showToast('+1 💎');
+      return;
     }
-
-    _showComboFx(msg, merges: merges);
-    _showToast(msg);
+    if (merges >= 8) {
+      _showComboFx(lang == AppLang.de ? 'TOLLE KOMBO!' : 'AWESOME COMBO!');
+    } else if (merges >= 5) {
+      _showComboFx(lang == AppLang.de ? 'SUPER KOMBO!' : 'SUPER COMBO!');
+    }
   }
 
   void _maybeShowNextLevelReward() {
-    // Premium feel: level progression grants a small diamond reward.
-    _animateDiamondGain(3);
-    _showToast(lang == AppLang.de ? '+3 💎 LEVEL BONUS' : '+3 💎 LEVEL BONUS');
+    // Phase 2 rewarded flow is not wired in this DartPad-safe build.
+    // Kept as no-op so we don't break existing call sites.
   }
 
   void _saveGame() {
-    _saveToBlob();
+    // Persistence is disabled in DartPad. In the full app you can wire this to
+    // SharedPreferences without changing call sites.
   }
 
   void _checkGoalAndMaybeAdvance() {
-    // Phase 1: level increases when reaching targets (2048, 4096, 8192 ...).
-    // No automatic diamond reward here (rewarded flow will be Phase 2).
     while (true) {
       final goal = _goalForLevel(levelIdx);
       final curMax = _maxOnBoard();
       if (curMax >= goal) {
         levelIdx += 1;
         _showLevelUpFx(levelIdx);
+        _animateDiamondGain(1);
+        _showToast('+1 💎');
         continue;
       }
       break;
@@ -890,6 +895,7 @@ void _collapseAndFill() {
     swapMode = false;
     _swapFirst = null;
     _showToast(t('swap'));
+    _saveToBlob();
     setState(() {});
   }
 
@@ -899,6 +905,7 @@ void _collapseAndFill() {
     _collapseAndFill();
     hammerMode = false;
     _showToast(t('broken'));
+    _saveToBlob();
     setState(() {});
   }
 
@@ -970,11 +977,9 @@ void _handleDuplicateTap(Pos p) {
 }
 
   void _watchAdReward() {
-    _animateDiamondGain(10);
-    _showToast('+10 💎');
-    _saveToBlob();
-    setState(() {});
-  }
+  _animateDiamondGain(10);
+  _showToast('+10 💎');
+}
 
   // ===== UI helpers =====
 
@@ -1010,35 +1015,48 @@ void _handleDuplicateTap(Pos p) {
     setState(() {});
   }
 
-  void _showComboFx(String msg, {required int merges}) {
+
+  void _showComboFx(String msg) {
     _comboTimer?.cancel();
     _comboMsg = msg;
     _comboCtrl.forward(from: 0);
     _shakeCtrl.forward(from: 0);
     _shimmerCtrl.repeat(reverse: true);
-
-    _comboTimer = Timer(const Duration(milliseconds: 1100), () {
+    _comboTimer = Timer(const Duration(milliseconds: 900), () {
       if (!mounted) return;
-      _comboCtrl.reverse().whenComplete(() {
-        if (!mounted) return;
-        setState(() => _comboMsg = null);
-      });
+      _comboCtrl.reverse();
+      _shakeCtrl.reverse();
       _shimmerCtrl.stop();
       _shimmerCtrl.value = 0;
+      setState(() => _comboMsg = null);
     });
-
     setState(() {});
   }
 
   Offset _diamondCounterCenterGlobal() {
     final ctx = _diamondCounterKey.currentContext;
-    if (ctx == null) return const Offset(56, 40);
+    if (ctx == null) return const Offset(56, 42);
     final box = ctx.findRenderObject();
     if (box is RenderBox) {
       final p = box.localToGlobal(Offset.zero);
-      return p + Offset(box.size.width * 0.5, box.size.height * 0.5);
+      return p + Offset(box.size.width * 0.5, box.size.height * 0.42);
     }
-    return const Offset(56, 40);
+    return const Offset(56, 42);
+  }
+
+  int _visualGemCountFor(int amount) {
+    if (amount <= 5) return amount;
+    if (amount == 10) return 7;
+    if (amount == 50) return 15;
+    if (amount == 100) return 20;
+    if (amount >= 500) return 30;
+    return amount.clamp(1, 12);
+  }
+
+  List<int> _gemSteps(int amount, int visualCount) {
+    final base = amount ~/ visualCount;
+    final rem = amount % visualCount;
+    return List<int>.generate(visualCount, (i) => base + (i < rem ? 1 : 0));
   }
 
   void _animateDiamondGain(int amount) {
@@ -1046,46 +1064,27 @@ void _handleDuplicateTap(Pos p) {
     final now = DateTime.now().millisecondsSinceEpoch;
     final target = _diamondCounterCenterGlobal();
     final media = MediaQuery.of(context);
-    final fromBase = Offset(media.size.width * 0.5, media.padding.top + 140);
+    final fromBase = Offset(media.size.width * 0.5, media.padding.top + 145);
     final rng = Random();
-    for (int i = 0; i < amount; i++) {
-      final jitter = Offset((rng.nextDouble() - 0.5) * 80, (rng.nextDouble() - 0.5) * 46);
-      _gemFlyFx.add(_GemFlyFx(
-        id: _gemFxId++,
-        from: fromBase + jitter,
-        to: target,
-        startMs: now + i * 90,
-      ));
-    }
+    final visualCount = _visualGemCountFor(amount);
+    final steps = _gemSteps(amount, visualCount);
+
+    setState(() {
+      for (int i = 0; i < visualCount; i++) {
+        final jitter = Offset((rng.nextDouble() - 0.5) * 90, (rng.nextDouble() - 0.5) * 50);
+        _gemFlyFx.add(_GemFlyFx(id: _gemFxId++, from: fromBase + jitter, to: target, startMs: now + i * 65));
+      }
+    });
 
     _gemAwardTicker?.cancel();
-    int remaining = amount;
-    _gemAwardTicker = Timer.periodic(const Duration(milliseconds: 90), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      setState(() {
-        diamonds += 1;
-      });
-      if (remaining == amount) {
-        HapticFeedback.selectionClick();
-      }
-      remaining -= 1;
-      if (remaining <= 0) {
-        timer.cancel();
-        _saveGame();
-      }
+    int idx = 0;
+    _gemAwardTicker = Timer.periodic(const Duration(milliseconds: 65), (timer) {
+      if (!mounted) { timer.cancel(); return; }
+      if (idx >= steps.length) { timer.cancel(); _saveToBlob(); return; }
+      setState(() => diamonds += steps[idx]);
+      idx++;
+      if (idx >= steps.length) _saveToBlob();
     });
-
-    Future.delayed(Duration(milliseconds: amount * 90 + 850), () {
-      if (!mounted) return;
-      setState(() {
-        _gemFlyFx.clear();
-      });
-    });
-
-    setState(() {});
   }
 
 
@@ -1162,13 +1161,6 @@ void _handleDuplicateTap(Pos p) {
 
   @override
   Widget build(BuildContext context) {
-    if (_booting) {
-      return const Scaffold(
-        backgroundColor: Color(0xFF071033),
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
     final goal = _goalForLevel(levelIdx);
     final curMax = _maxOnBoard();
     final bestLocal = best;
@@ -1222,53 +1214,35 @@ void _handleDuplicateTap(Pos p) {
                   ),
                 ),
               ),
-
             if (_comboMsg != null)
-              Positioned.fill(
+              Positioned(
+                top: 92,
+                left: 0,
+                right: 0,
                 child: IgnorePointer(
                   child: AnimatedBuilder(
                     animation: Listenable.merge([_comboCtrl, _shakeCtrl, _shimmerCtrl]),
                     builder: (context, _) {
-                      final t = Curves.easeOutCubic.transform(_comboCtrl.value.clamp(0.0, 1.0));
-                      final pulse = 1.0 + 0.14 * sin(_shimmerCtrl.value * pi * 2);
-                      final dx = sin(_shakeCtrl.value * pi * 6) * (1.0 - _shakeCtrl.value) * 18.0;
-                      return Opacity(
-                        opacity: (1.0 - (_comboCtrl.status == AnimationStatus.reverse ? (1 - t) : 0)).clamp(0.0, 1.0),
-                        child: Center(
-                          child: Transform.translate(
-                            offset: Offset(dx, -40 - 22 * (1 - t)),
-                            child: Transform.scale(
-                              scale: (0.9 + (t * 2.6)) * pulse,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(24),
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      const Color(0x9927E6FF),
-                                      const Color(0xCC8A5BFF),
-                                      const Color(0x99FF4D8D),
-                                    ],
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: const Color(0xFF27E6FF).withOpacity(0.35),
-                                      blurRadius: 26,
-                                      spreadRadius: 6,
-                                    ),
-                                    BoxShadow(
-                                      color: const Color(0xFF8A5BFF).withOpacity(0.35),
-                                      blurRadius: 36,
-                                      spreadRadius: 10,
-                                    ),
-                                  ],
-                                  border: Border.all(color: Colors.white.withOpacity(0.65), width: 1.4),
-                                ),
-                                child: Text(
-                                  _comboMsg ?? '',
-                                  textAlign: TextAlign.center,
-                                  style: _neon(16, opacity: 1.0),
-                                ),
+                      final t = Curves.easeOutBack.transform(_comboCtrl.value.clamp(0.0, 1.0));
+                      final wobble = sin(_shakeCtrl.value * pi * 8) * 4.0 * (1 - _shakeCtrl.value);
+                      return Center(
+                        child: Transform(
+                          alignment: Alignment.center,
+                          transform: Matrix4.identity()..setEntry(3,2,0.0011)..rotateX((1-t)*0.22)..rotateY(wobble*0.006)..scale(0.9 + t*0.9),
+                          child: Opacity(
+                            opacity: _comboCtrl.value,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(22),
+                                gradient: const LinearGradient(colors: [Color(0xEE23134A), Color(0xE73D2180), Color(0xDE0E6388)]),
+                                border: Border.all(color: Colors.white54),
+                                boxShadow: const [BoxShadow(color: Color(0x558A5BFF), blurRadius: 20), BoxShadow(color: Color(0x406EE7FF), blurRadius: 28)],
+                              ),
+                              child: ShaderMask(
+                                shaderCallback: (r) => LinearGradient(begin: Alignment(-1 + _shimmerCtrl.value * 2, -1), end: Alignment(1 + _shimmerCtrl.value * 2, 1), colors: const [Colors.white, Color(0xFFE8F9FF), Colors.white]).createShader(r),
+                                blendMode: BlendMode.srcATop,
+                                child: Text(_comboMsg!, style: _neon(15, opacity: 1.0)),
                               ),
                             ),
                           ),
@@ -1278,66 +1252,41 @@ void _handleDuplicateTap(Pos p) {
                   ),
                 ),
               ),
-
-            ..._gemFlyFx.map((fx) => Positioned.fill(
-                  child: IgnorePointer(
-                    child: TweenAnimationBuilder<double>(
-                      key: ValueKey('gemfx_${fx.id}'),
-                      tween: Tween(begin: 0, end: 1),
-                      duration: Duration(
-                        milliseconds: max(700, (fx.startMs - DateTime.now().millisecondsSinceEpoch) + 700),
+            ..._gemFlyFx.map((fx) {
+              final now = DateTime.now().millisecondsSinceEpoch;
+              final p = ((now - fx.startMs) / 760.0).clamp(0.0, 1.0);
+              if (p >= 1.0) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!mounted) return;
+                  _gemFlyFx.removeWhere((e) => e.id == fx.id);
+                  setState(() {});
+                });
+                return const SizedBox.shrink();
+              }
+              final arcY = sin(p * pi) * -62;
+              final pos = Offset.lerp(fx.from, fx.to, p)! + Offset(0, arcY);
+              final sz = 20 * (0.8 + (1 - p) * 0.35);
+              return Positioned(
+                left: pos.dx - sz / 2,
+                top: pos.dy - sz / 2,
+                child: IgnorePointer(
+                  child: Transform.rotate(
+                    angle: p * pi * 4,
+                    child: Container(
+                      width: sz,
+                      height: sz,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: const RadialGradient(colors: [Color(0xFFF8F9FF), Color(0xFFB388FF), Color(0xFF6EE7FF)]),
+                        boxShadow: const [BoxShadow(color: Color(0x55B388FF), blurRadius: 12), BoxShadow(color: Color(0x406EE7FF), blurRadius: 18)],
+                        border: Border.all(color: Colors.white70, width: 1),
                       ),
-                      curve: Curves.easeInOutCubic,
-                      builder: (context, t, _) {
-                        final now = DateTime.now().millisecondsSinceEpoch;
-                        final delay = fx.startMs - now;
-                        if (delay > 0) return const SizedBox.shrink();
-                        final p = ((-delay) / 700).clamp(0.0, 1.0).toDouble();
-                        final arcY = sin(p * pi) * -60;
-                        final pos = Offset.lerp(fx.from, fx.to, p)! + Offset(0, arcY);
-                        final s = 0.65 + (1 - p) * 0.65;
-                        return Stack(
-                          children: [
-                            Positioned(
-                              left: pos.dx - 12,
-                              top: pos.dy - 12,
-                              child: Transform.rotate(
-                                angle: p * pi * 4,
-                                child: Transform.scale(
-                                  scale: s,
-                                  child: Container(
-                                    width: 24,
-                                    height: 24,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      gradient: RadialGradient(
-                                        colors: [
-                                          const Color(0xFFFFF59D),
-                                          const Color(0xFFFFD54F),
-                                          const Color(0xFFB388FF),
-                                        ],
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: const Color(0xFFFFD54F).withOpacity(0.45),
-                                          blurRadius: 16,
-                                          spreadRadius: 3,
-                                        ),
-                                      ],
-                                      border: Border.all(color: Colors.white.withOpacity(0.75), width: 1),
-                                    ),
-                                    child: const Icon(Icons.diamond, size: 13, color: Color(0xFF1A1037)),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
+                      child: Icon(Icons.diamond, size: sz * 0.54, color: const Color(0xFF1A1037)),
                     ),
                   ),
-                )),
-
+                ),
+              );
+            }),
             if (_levelMsg != null)
               Positioned.fill(
                 child: IgnorePointer(
@@ -1347,66 +1296,19 @@ void _handleDuplicateTap(Pos p) {
                       final t = _levelCtrl.value;
                       final eased = Curves.easeOutCubic.transform(t.clamp(0.0, 1.0));
                       final fade = (1.0 - (t - 0.72).clamp(0.0, 0.28) / 0.28).clamp(0.0, 1.0);
-                      final scale = 0.65 + (eased * 1.35); // ~3x visual impact via huge base + scale
                       return Opacity(
                         opacity: fade,
                         child: Center(
                           child: Transform.scale(
-                            scale: scale,
+                            scale: 0.75 + (eased * 1.0),
                             child: SizedBox(
-                              width: 360,
-                              height: 360,
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                      painter: _LevelUpBurstPainter(
-                                        t: eased,
-                                        seed: levelIdx * 997,
-                                      ),
-                                    ),
-                                  ),
-                                  Container(
-                                    width: 300,
-                                    height: 300,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      gradient: RadialGradient(
-                                        colors: [
-                                          const Color(0xAA7DF9FF),
-                                          const Color(0x668A5BFF),
-                                          Colors.transparent,
-                                        ],
-                                      ),
-                                      border: Border.all(
-                                        color: Colors.white.withOpacity(0.65),
-                                        width: 1.8,
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: const Color(0xFF7DF9FF).withOpacity(0.35),
-                                          blurRadius: 26,
-                                          spreadRadius: 4,
-                                        ),
-                                        BoxShadow(
-                                          color: const Color(0xFF8A5BFF).withOpacity(0.28),
-                                          blurRadius: 40,
-                                          spreadRadius: 8,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text('LEVEL UP', style: _neon(24, opacity: 0.98)),
-                                      const SizedBox(height: 2),
-                                      Text('LV $levelIdx', style: _neon(48, opacity: 1.0)),
-                                    ],
-                                  ),
-                                ],
-                              ),
+                              width: 420,
+                              height: 420,
+                              child: Stack(alignment: Alignment.center, children: [
+                                Positioned.fill(child: CustomPaint(painter: _LevelUpBurstPainter(t: eased, seed: levelIdx * 997))),
+                                Container(width: 348, height: 348, decoration: BoxDecoration(shape: BoxShape.circle, gradient: const RadialGradient(colors: [Color(0xAA7DF9FF), Color(0x668A5BFF), Colors.transparent]))),
+                                Column(mainAxisSize: MainAxisSize.min, children: [Text('LEVEL UP', style: _neon(26)), const SizedBox(height: 4), Text('LV $levelIdx', style: _neon(52))]),
+                              ]),
                             ),
                           ),
                         ),
@@ -1760,10 +1662,9 @@ Widget _buildBoard() {
           child: _actionButton(
             icon: swapMode ? Icons.close : Icons.swap_horiz,
             label: t('swap'),
-            sub: '10',
+            diamondCost: 10,
             active: swapMode,
             onTap: _toggleSwap,
-            showLabel: false,
           ),
         ),
         const SizedBox(width: 6),
@@ -1771,21 +1672,19 @@ Widget _buildBoard() {
           child: _actionButton(
             icon: hammerMode ? Icons.close : Icons.gavel,
             label: t('hammer'),
-            sub: '7',
+            diamondCost: 7,
             active: hammerMode,
             onTap: _toggleHammer,
-            showLabel: false,
           ),
         ),
         const SizedBox(width: 6),
         Expanded(
           child: _actionButton(
             icon: Icons.smart_display,
-            label: t('watchAd'),
+            label: t('watchDiamonds'),
             sub: '+10',
             active: false,
             onTap: _watchAdReward,
-            showLabel: false,
           ),
         ),
         const SizedBox(width: 6),
@@ -1793,10 +1692,9 @@ Widget _buildBoard() {
           child: _actionButton(
             icon: duplicateMode ? Icons.close : Icons.copy,
             label: t('duplicate'),
-            sub: '20',
+            diamondCost: 20,
             active: duplicateMode,
             onTap: _toggleDuplicate,
-            showLabel: false,
           ),
         ),
         const SizedBox(width: 6),
@@ -1807,7 +1705,6 @@ Widget _buildBoard() {
             sub: '',
             active: false,
             onTap: _openShopSheet,
-            showLabel: false,
           ),
         ),
       ],
@@ -1818,73 +1715,33 @@ Widget _buildBoard() {
   Widget _actionButton({
     required IconData icon,
     required String label,
-    String? sub,
-    required bool active,
     required VoidCallback onTap,
-    double? height,
+    String? sub,
+    int? diamondCost,
+    bool active = false,
     bool showLabel = false,
-    bool showSub = true,
   }) {
     final scale = uiScale;
-    final h = height ?? (74.0 * scale);
-
     return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          height: h,
-          margin: EdgeInsets.symmetric(horizontal: 5 * scale),
-          padding: EdgeInsets.symmetric(horizontal: 10 * scale, vertical: 10 * scale),
-          decoration: BoxDecoration(
-            color: active ? const Color(0xFF1B2A57).withOpacity(0.90) : const Color(0xFF0E1A3B).withOpacity(0.78),
-            borderRadius: BorderRadius.circular(16 * scale),
-            border: Border.all(color: active ? const Color(0xFF7DF9FF).withOpacity(0.60) : Colors.white.withOpacity(0.06)),
-            boxShadow: [
-              if (active)
-                BoxShadow(
-                  color: const Color(0xFF7DF9FF).withOpacity(0.20),
-                  blurRadius: 18 * scale,
-                  spreadRadius: 1,
-                )
-            ],
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 32 * scale, color: Colors.white.withOpacity(0.98)),
-              SizedBox(height: 4 * scale),
-              if (showSub && sub != null && sub!.isNotEmpty)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.diamond, size: 14, color: Color(0xFFB388FF)),
-                    SizedBox(width: 3 * scale),
-                    Text(
-                      sub!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: _neon(13 * scale, opacity: 0.95),
-                    ),
-                  ],
-                )
-              else if (showLabel)
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: _neon(12 * scale, opacity: 0.92),
-                  ),
-                ),
-            ],
-          ),
+      onTap: onTap,
+      child: Container(
+        height: 64 * scale,
+        padding: EdgeInsets.symmetric(horizontal: 8 * scale, vertical: 6 * scale),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18 * scale),
+          gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: active ? [const Color(0xFF7C4DFF).withOpacity(0.40), const Color(0xFF00E5FF).withOpacity(0.30)] : [Colors.white.withOpacity(0.07), Colors.white.withOpacity(0.03)]),
+          border: Border.all(color: active ? const Color(0xFF7DF9FF).withOpacity(0.60) : Colors.white.withOpacity(0.12)),
         ),
-      );
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, size: 24 * scale, color: Colors.white.withOpacity(0.98)),
+          const SizedBox(height: 5),
+          if (diamondCost != null)
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.diamond, size: 15 * scale, color: const Color(0xFFB388FF)), SizedBox(width: 4 * scale), Text('$diamondCost', style: _neon(12 * scale))])
+          else if (sub != null)
+            Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: _neon(12.5 * scale, opacity: 0.98)),
+        ]),
+      ),
+    );
   }
 
   // ===== Sheets / dialogs =====
