@@ -4,12 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  // Force portrait-only (prevents landscape even if user rotates the device).
-  await SystemChrome.setPreferredOrientations(<DeviceOrientation>[
-    DeviceOrientation.portraitUp,
-  ]);
+void main() {
   runApp(const MergeBlocksApp());
 }
 
@@ -32,7 +27,8 @@ class MergeBlocksApp extends StatelessWidget {
   }
 }
 
-enum AppLang { tr, en, de }
+// Supported UI languages. (Turkish removed by request.)
+enum AppLang { en, de }
 
 class UltraGamePage extends StatefulWidget {
   const UltraGamePage({super.key});
@@ -89,7 +85,8 @@ void _saveToBlob() {
     'levelIdx': levelIdx,
     'diamonds': diamonds,
     'swaps': swaps,
-    'lang': lang.index,
+    // Store as string for forward/backward compatibility.
+    'lang': lang.name,
   };
   _saveBlob.value = jsonEncode(data);
 }
@@ -120,9 +117,25 @@ void _loadFromBlob(String blob) {
     diamonds = (data['diamonds'] as num?)?.toInt() ?? 0;
     swaps = (data['swaps'] as num?)?.toInt() ?? 0;
 
-    final li = (data['lang'] as num?)?.toInt();
-    if (li != null && li >= 0 && li < AppLang.values.length) {
-      lang = AppLang.values[li];
+    // Language migration:
+    // - New format: string 'en'/'de'
+    // - Old format: int index (from previous builds)
+    // - If an older save stored 'tr' (removed), fall back to English.
+    final rawLang = data['lang'];
+    if (rawLang is String) {
+      if (rawLang == 'de') {
+        lang = AppLang.de;
+      } else {
+        // includes 'en' and any unknown (incl. legacy 'tr')
+        lang = AppLang.en;
+      }
+    } else {
+      final li = (rawLang as num?)?.toInt();
+      if (li != null && li >= 0 && li < AppLang.values.length) {
+        lang = AppLang.values[li];
+      } else {
+        lang = AppLang.en;
+      }
     }
 
     _clearPath();
@@ -229,33 +242,9 @@ Random _rng = Random();
     'buy': 'Kaufen',
   };
 
-  static const Map<String, String> _tr = {
-    'now': 'ŞİMDİ',
-    'max': 'EN BÜYÜK',
-    'next': 'HEDEF',
-    'swap': 'TAKAS',
-    'hammer': 'TOKMAK',
-    'watchAd': 'REKLAM',
-    'earnDiamonds': 'ELMAS +10',
-    'duplicate': 'DUP x2',
-    'swapBonus': 'Swap Bonusu',
-    'swapPlus': '+1 SWAP',
-    'noSwaps': 'Swap hakkın yok',
-    'shop': 'MAĞAZA',
-    'pause': 'DURAKLAT',
-    'settings': 'Ayarlar',
-    'resume': 'Devam',
-    'restart': 'Yeniden başlat',
-    'notEnoughDiamonds': 'Yeterli elmas yok',
-    'broken': 'Kırıldı!',
-    'shopTitle': 'Elmas Mağazası',
-    'buy': 'Satın al',
-  };
-
   String t(String key) {
     final dict = switch (lang) {
       AppLang.de => _de,
-      AppLang.tr => _tr,
       AppLang.en => _en,
     };
     return dict[key] ?? key;
@@ -714,17 +703,11 @@ void _collapseAndFill() {
     String msg;
     if (merges >= 11) {
       diamonds += 1;
-      msg = lang == AppLang.de
-          ? 'MEGA KOMBO! +1 💎'
-          : (lang == AppLang.tr ? 'MUHTEŞEM KOMBO! +1 💎' : 'MEGA COMBO! +1 💎');
+      msg = lang == AppLang.de ? 'MEGA KOMBO! +1 💎' : 'MEGA COMBO! +1 💎';
     } else if (merges >= 8) {
-      msg = lang == AppLang.de
-          ? 'TOLLE KOMBO!'
-          : (lang == AppLang.tr ? 'HARİKA KOMBO!' : 'AWESOME COMBO!');
+      msg = lang == AppLang.de ? 'TOLLE KOMBO!' : 'AWESOME COMBO!';
     } else {
-      msg = lang == AppLang.de
-          ? 'SUPER KOMBO!'
-          : (lang == AppLang.tr ? 'SÜPER KOMBO!' : 'SUPER COMBO!');
+      msg = lang == AppLang.de ? 'SUPER KOMBO!' : 'SUPER COMBO!';
     }
     _showToast(msg);
   }
@@ -1402,7 +1385,6 @@ Widget _buildBoard() {
   );
 }
 
-  
   Widget _actionButton({
     required IconData icon,
     required String label,
@@ -1414,57 +1396,67 @@ Widget _buildBoard() {
     bool showSub = true,
   }) {
     final scale = uiScale;
+    final h = height ?? (74.0 * scale);
 
-    // Bigger, finger-friendly controls for portrait phones.
-    final h = height ?? (90.0 * scale).clamp(82.0, 104.0);
-    final iconSize = (32.0 * scale).clamp(26.0, 38.0);
-    final hasSub = sub != null && sub!.trim().isNotEmpty;
-
-    final borderColor = (active ? Colors.white : Colors.white.withOpacity(0.22));
-    final bg = Colors.black.withOpacity(active ? 0.56 : 0.40);
-
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
-        height: h,
-        padding: EdgeInsets.symmetric(horizontal: 10.0 * scale, vertical: 10.0 * scale),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          color: bg,
-          border: Border.all(color: borderColor, width: 1.6),
-          boxShadow: [
-            if (active)
-              BoxShadow(
-                color: Colors.white.withOpacity(0.18),
-                blurRadius: 18,
-                spreadRadius: 1,
-              ),
-          ],
-        ),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          height: h,
+          margin: EdgeInsets.symmetric(horizontal: 5 * scale),
+          padding: EdgeInsets.symmetric(horizontal: 10 * scale, vertical: 10 * scale),
+          decoration: BoxDecoration(
+            color: active ? const Color(0xFF1B2A57).withOpacity(0.90) : const Color(0xFF0E1A3B).withOpacity(0.78),
+            borderRadius: BorderRadius.circular(16 * scale),
+            border: Border.all(color: active ? const Color(0xFF7DF9FF).withOpacity(0.60) : Colors.white.withOpacity(0.06)),
+            boxShadow: [
+              if (active)
+                BoxShadow(
+                  color: const Color(0xFF7DF9FF).withOpacity(0.20),
+                  blurRadius: 18 * scale,
+                  spreadRadius: 1,
+                )
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: iconSize, color: Colors.white.withOpacity(0.96)),
-              if (showLabel) SizedBox(height: 6.0 * scale),
-              if (showLabel)
-                Text(
-                  label,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: _neon((13.0 * scale).clamp(12.0, 16.0), opacity: 0.95),
+              Icon(icon, size: 22 * scale, color: Colors.white.withOpacity(0.95)),
+              SizedBox(width: 10 * scale),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    if (showLabel)
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: _neon(12 * scale, opacity: 0.96),
+                        ),
+                      ),
+                    if (showSub && sub != null) ...[
+                      SizedBox(height: 4 * scale),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          sub,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: _neon(12 * scale, opacity: 0.86),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-              if (showSub && hasSub) SizedBox(height: 2.0 * scale),
-              if (showSub && hasSub)
-                Text(
-                  sub!,
-                  textAlign: TextAlign.center,
-                  style: _neon((11.0 * scale).clamp(10.0, 13.0), opacity: 0.72),
-                ),
+              ),
             ],
           ),
         ),
@@ -1472,7 +1464,9 @@ Widget _buildBoard() {
     );
   }
 
-void _openShopSheet() {
+  // ===== Sheets / dialogs =====
+
+  void _openShopSheet() {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF06102C),
@@ -1535,7 +1529,7 @@ void _openShopSheet() {
               }),
               const SizedBox(height: 6),
               Text(
-                'Not: Bu sayfa şimdilik “test purchase” gibi çalışır. Gerçek IAP entegrasyonunu istersen ekleriz.',
+                'Note: This shop UI is a placeholder. (Real Google Play Billing can be integrated in the full project.)',
                 style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 11, fontWeight: FontWeight.w600),
                 textAlign: TextAlign.center,
               ),
@@ -1563,7 +1557,6 @@ void _openShopSheet() {
                 title: 'Language',
                 child: SegmentedButton<AppLang>(
                   segments: const [
-                    ButtonSegment(value: AppLang.tr, label: Text('TR')),
                     ButtonSegment(value: AppLang.en, label: Text('EN')),
                     ButtonSegment(value: AppLang.de, label: Text('DE')),
                   ],
