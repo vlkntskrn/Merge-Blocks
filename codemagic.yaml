@@ -1,1 +1,95 @@
+workflows:
+  android-release:
+    name: Android Release (AAB + APK)
+    max_build_duration: 60
+    instance_type: mac_mini_m2 # Android için Linux da olur, Codemagic hesabındaki uygun instance'a göre değiştirilebilir
 
+    environment:
+      flutter: stable
+
+      # Codemagic UI > Environment variables kısmında tanımlayacaksın:
+      # CM_KEYSTORE_PASSWORD, CM_KEY_PASSWORD, CM_KEY_ALIAS
+      # Ayrıca keystore dosyasını "Secure files" olarak ekleyip ismini CM_KEYSTORE_PATH ile referanslayacağız.
+      vars:
+        PACKAGE_NAME: "com.yourcompany.merge_blocks" # <-- düzelt
+        # Secure files'tan gelen dosyanın cihaz içi yolu:
+        CM_KEYSTORE_PATH: "$CM_BUILD_DIR/android/app/upload-keystore.jks"
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+
+    cache:
+      cache_paths:
+        - $HOME/.pub-cache
+        - $CM_BUILD_DIR/.dart_tool
+        - $CM_BUILD_DIR/build
+
+    scripts:
+      - name: Show Flutter version
+        script: flutter --version
+
+      - name: Flutter pub get
+        script: flutter pub get
+
+      # Keystore'u Secure Files'tan proje içine kopyala
+      # Codemagic UI > Team > Code signing / Secure files (veya build ekranında) upload edip burada kullanırsın.
+      - name: Prepare Android keystore
+        script: |
+          set -e
+          ls -la android/app || true
+
+          # Eğer Secure files otomatik olarak doğru path'e koymuyorsa,
+          # Codemagic'in "Secure files" adımında dosyayı $CM_BUILD_DIR/android/app/ altına koyacak şekilde ayarla.
+          # Bu script, dosya mevcut mu diye kontrol ediyor:
+          if [ ! -f "$CM_KEYSTORE_PATH" ]; then
+            echo "ERROR: Keystore not found at: $CM_KEYSTORE_PATH"
+            echo "Upload upload-keystore.jks to Codemagic Secure files and map it to this path."
+            exit 1
+          fi
+
+          # key.properties üret (android/app/key.properties)
+          cat > android/key.properties <<EOF
+          storePassword=${CM_KEYSTORE_PASSWORD}
+          keyPassword=${CM_KEY_PASSWORD}
+          keyAlias=${CM_KEY_ALIAS}
+          storeFile=upload-keystore.jks
+          EOF
+
+          # build.gradle storeFile relative path kullansın diye keystore'u android/app içine kopyala
+          cp "$CM_KEYSTORE_PATH" android/app/upload-keystore.jks
+
+          echo "key.properties created:"
+          cat android/key.properties
+
+      - name: Flutter analyze (optional)
+        script: flutter analyze || true
+
+      - name: Run tests (optional)
+        script: flutter test || true
+
+      # AAB (Play Store için önerilen)
+      - name: Build App Bundle (AAB) - release
+        script: flutter build appbundle --release
+
+      # APK (cihaz testi için)
+      - name: Build APK - release
+        script: flutter build apk --release
+
+    artifacts:
+      - build/app/outputs/bundle/release/*.aab
+      - build/app/outputs/flutter-apk/app-release.apk
+      - android/key.properties
+      - flutter_drive.log
+
+    publishing:
+      email:
+        recipients:
+          - "vlkntskrn@gmail.com"
+        notify:
+          success: true
+          failure: true
