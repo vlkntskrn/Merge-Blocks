@@ -1,8 +1,58 @@
 import 'dart:async';
 import 'dart:math';
+
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+const String _prefsKeyV1 = 'merge_blocks_save_v1';
+
+
+class _LevelUpBurstPainter extends CustomPainter {
+  final double t;
+  final int seed;
+
+  const _LevelUpBurstPainter({required this.t, required this.seed});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rng = Random(seed);
+    final center = Offset(size.width / 2, size.height / 2);
+    final fade = (1.0 - t).clamp(0.0, 1.0);
+
+    final rayPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.4
+      ..color = const Color(0xFF27E6FF).withOpacity(0.32 * fade);
+
+    for (int i = 0; i < 20; i++) {
+      final a = (i / 20.0) * pi * 2 + rng.nextDouble() * 0.16;
+      final r0 = size.shortestSide * (0.10 + 0.06 * t);
+      final r1 = size.shortestSide * (0.44 + 0.20 * t) * (0.9 + rng.nextDouble() * 0.25);
+      canvas.drawLine(center + Offset(cos(a), sin(a)) * r0, center + Offset(cos(a), sin(a)) * r1, rayPaint);
+    }
+
+    final ringPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.2
+      ..color = const Color(0xFF8A5BFF).withOpacity(0.22 * fade);
+
+    canvas.drawCircle(center, size.shortestSide * (0.31 + 0.09 * t), ringPaint);
+    canvas.drawCircle(center, size.shortestSide * (0.20 + 0.07 * t), ringPaint..strokeWidth = 2.1);
+
+    final glow = Paint()
+      ..style = PaintingStyle.fill
+      ..color = const Color(0xFF27E6FF).withOpacity(0.11 * fade);
+    canvas.drawCircle(center, size.shortestSide * (0.24 + 0.06 * t), glow);
+  }
+
+  @override
+  bool shouldRepaint(covariant _LevelUpBurstPainter oldDelegate) {
+    return oldDelegate.t != t || oldDelegate.seed != seed;
+  }
+}
+
 
 void main() {
   runApp(const MergeBlocksApp());
@@ -38,6 +88,15 @@ class UltraGamePage extends StatefulWidget {
 }
 
 class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateMixin, WidgetsBindingObserver, RestorationMixin {
+  // Boot/persistence
+  bool _booting = true;
+  Timer? _autoSaveTimer;
+
+  // Level-up FX
+  late final AnimationController _levelCtrl;
+  Timer? _levelTimer;
+  String? _levelMsg;
+
   // ===== Board config =====
   static const int cols = 5;
   static const int rows = 7;
@@ -89,7 +148,10 @@ void _saveToBlob() {
     'lang': lang.name,
   };
   _saveBlob.value = jsonEncode(data);
+
+  _saveToPrefs();
 }
+
 
 void _loadFromBlob(String blob) {
   try {
@@ -149,6 +211,35 @@ void _loadFromBlob(String blob) {
   }
 }
 
+  void _startAutoSave() {
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = Timer.periodic(const Duration(seconds: 4), (_) => _saveToBlob());
+  }
+
+  Future<void> _saveToPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = _saveBlob.value;
+      if (raw == null || raw.isEmpty) return;
+      await prefs.setString(_prefsKeyV1, raw);
+    } catch (_) {}
+  }
+
+  Future<bool> _loadFromPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsKeyV1);
+      if (raw == null || raw.isEmpty) return false;
+      _saveBlob.value = raw;
+      _loadFromBlob(raw);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+
+
 Random _rng = Random();
 
   late List<List<BigInt?>> grid;
@@ -191,7 +282,9 @@ Random _rng = Random();
   late final AnimationController _toastCtrl;
   late final Animation<double> _toastOpacity;
   late final Animation<double> _toastScale;
-
+  late final AnimationController _comboCtrl;
+  late final AnimationController _shakeCtrl;
+  late final AnimationController _shimmerCtrl;
 
   AppLang lang = AppLang.en;
 
@@ -253,22 +346,32 @@ Random _rng = Random();
   @override
   void initState() {
     super.initState();
-    _toastCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 260));
-    _toastOpacity = CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutCubic);
-    _toastScale = Tween<double>(begin: 0.92, end: 1.0).animate(CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutBack));
     WidgetsBinding.instance.addObserver(this);
 
-    // Ensure grid exists immediately to avoid late-init errors.
-    grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
+    _toastCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
+    _toastOpacity = CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOut, reverseCurve: Curves.easeIn);
+    _toastScale = Tween<double>(begin: 0.92, end: 1.0).animate(CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutBack, reverseCurve: Curves.easeIn));
+    _comboCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
+    _shakeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
+    _shimmerCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
 
-    // If no restoration happened, start a new game after first frame.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (!_didRestore && _saveBlob.value == null) {
-        _resetBoard(hard: true);
-        _saveToBlob();
+    _levelCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200));
+
+    () async {
+      final okPrefs = await _loadFromPrefs();
+      if (!okPrefs) {
+        final raw = _saveBlob.value;
+        if (raw != null && raw.isNotEmpty) {
+          _loadFromBlob(raw);
+        } else {
+          _resetBoard(hard: true);
+          _saveToBlob();
+        }
       }
-    });
+      _startAutoSave();
+      if (!mounted) return;
+      setState(() => _booting = false);
+    }();
   }
 
 
@@ -286,7 +389,13 @@ Random _rng = Random();
   @override
   void dispose() {
     _toastTimer?.cancel();
+    _autoSaveTimer?.cancel();
+    _levelTimer?.cancel();
     _toastCtrl.dispose();
+    _comboCtrl.dispose();
+    _shakeCtrl.dispose();
+    _shimmerCtrl.dispose();
+    _levelCtrl.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _saveToBlob();
     super.dispose();
@@ -718,8 +827,7 @@ void _collapseAndFill() {
   }
 
   void _saveGame() {
-    // Persistence is disabled in DartPad. In the full app you can wire this to
-    // SharedPreferences without changing call sites.
+    _saveToBlob();
   }
 
   void _checkGoalAndMaybeAdvance() {
@@ -730,7 +838,7 @@ void _collapseAndFill() {
       final curMax = _maxOnBoard();
       if (curMax >= goal) {
         levelIdx += 1;
-        _showToast('LEVEL UP → $levelIdx');
+        _showLevelUpFx(levelIdx);
         continue;
       }
       break;
@@ -867,6 +975,25 @@ void _handleDuplicateTap(Pos p) {
     });
   }
 
+  void _showLevelUpFx(int lvl) {
+    _levelTimer?.cancel();
+    _levelMsg = 'LEVEL $lvl';
+    _levelCtrl.forward(from: 0);
+    HapticFeedback.heavyImpact();
+
+    _levelTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted) return;
+      _levelCtrl.reverse().whenComplete(() {
+        if (!mounted) return;
+        setState(() => _levelMsg = null);
+      });
+    });
+
+    setState(() {});
+  }
+
+
+
   void _playChainNote(int index) {
     // Lightweight, plugin-free feedback. On mobile this is a short click + haptic.
     // (For real piano samples later, swap this out with an audio plugin.)
@@ -939,6 +1066,13 @@ void _handleDuplicateTap(Pos p) {
 
   @override
   Widget build(BuildContext context) {
+    if (_booting) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF071033),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final goal = _goalForLevel(levelIdx);
     final curMax = _maxOnBoard();
     final bestLocal = best;
@@ -989,6 +1123,84 @@ void _handleDuplicateTap(Pos p) {
                         child: Text(_toast!, style: _neon(15, opacity: 0.98)),
                       ),
                     ),
+                  ),
+                ),
+              ),
+
+            if (_levelMsg != null)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: AnimatedBuilder(
+                    animation: _levelCtrl,
+                    builder: (context, _) {
+                      final t = _levelCtrl.value;
+                      final eased = Curves.easeOutCubic.transform(t.clamp(0.0, 1.0));
+                      final fade = (1.0 - (t - 0.72).clamp(0.0, 0.28) / 0.28).clamp(0.0, 1.0);
+                      final scale = 0.65 + (eased * 1.35); // ~3x visual impact via huge base + scale
+                      return Opacity(
+                        opacity: fade,
+                        child: Center(
+                          child: Transform.scale(
+                            scale: scale,
+                            child: SizedBox(
+                              width: 140,
+                              height: 140,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: _LevelUpBurstPainter(
+                                        t: eased,
+                                        seed: levelIdx * 997,
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    width: 116,
+                                    height: 116,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      gradient: RadialGradient(
+                                        colors: [
+                                          const Color(0xAA7DF9FF),
+                                          const Color(0x668A5BFF),
+                                          Colors.transparent,
+                                        ],
+                                      ),
+                                      border: Border.all(
+                                        color: Colors.white.withOpacity(0.65),
+                                        width: 1.8,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: const Color(0xFF7DF9FF).withOpacity(0.35),
+                                          blurRadius: 26,
+                                          spreadRadius: 4,
+                                        ),
+                                        BoxShadow(
+                                          color: const Color(0xFF8A5BFF).withOpacity(0.28),
+                                          blurRadius: 40,
+                                          spreadRadius: 8,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text('LEVEL UP', style: _neon(10, opacity: 0.95)),
+                                      const SizedBox(height: 2),
+                                      Text('LV $levelIdx', style: _neon(18, opacity: 1.0)),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),
@@ -1335,9 +1547,10 @@ Widget _buildBoard() {
           child: _actionButton(
             icon: swapMode ? Icons.close : Icons.swap_horiz,
             label: t('swap'),
-            sub: '10 💎',
+            sub: '10',
             active: swapMode,
             onTap: _toggleSwap,
+            showLabel: false,
           ),
         ),
         const SizedBox(width: 6),
@@ -1345,19 +1558,21 @@ Widget _buildBoard() {
           child: _actionButton(
             icon: hammerMode ? Icons.close : Icons.gavel,
             label: t('hammer'),
-            sub: '7 💎',
+            sub: '7',
             active: hammerMode,
             onTap: _toggleHammer,
+            showLabel: false,
           ),
         ),
         const SizedBox(width: 6),
         Expanded(
           child: _actionButton(
             icon: Icons.smart_display,
-            label: t('watchDiamonds'),
-            sub: '+10 💎',
+            label: t('watchAd'),
+            sub: '+10',
             active: false,
             onTap: _watchAdReward,
+            showLabel: false,
           ),
         ),
         const SizedBox(width: 6),
@@ -1365,9 +1580,10 @@ Widget _buildBoard() {
           child: _actionButton(
             icon: duplicateMode ? Icons.close : Icons.copy,
             label: t('duplicate'),
-            sub: '20 💎',
+            sub: '20',
             active: duplicateMode,
             onTap: _toggleDuplicate,
+            showLabel: false,
           ),
         ),
         const SizedBox(width: 6),
@@ -1378,6 +1594,7 @@ Widget _buildBoard() {
             sub: '',
             active: false,
             onTap: _openShopSheet,
+            showLabel: false,
           ),
         ),
       ],
@@ -1398,8 +1615,7 @@ Widget _buildBoard() {
     final scale = uiScale;
     final h = height ?? (74.0 * scale);
 
-    return Expanded(
-      child: GestureDetector(
+    return GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
         child: AnimatedContainer(
@@ -1420,47 +1636,41 @@ Widget _buildBoard() {
                 )
             ],
           ),
-          child: Row(
+          child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 22 * scale, color: Colors.white.withOpacity(0.95)),
-              SizedBox(width: 10 * scale),
-              Expanded(
-                child: Column(
+              Icon(icon, size: 32 * scale, color: Colors.white.withOpacity(0.98)),
+              SizedBox(height: 4 * scale),
+              if (showSub && sub != null && sub!.isNotEmpty)
+                Row(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (showLabel)
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: _neon(12 * scale, opacity: 0.96),
-                        ),
-                      ),
-                    if (showSub && sub != null) ...[
-                      SizedBox(height: 4 * scale),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          sub,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: _neon(12 * scale, opacity: 0.86),
-                        ),
-                      ),
-                    ],
+                    const Icon(Icons.diamond, size: 14, color: Color(0xFFB388FF)),
+                    SizedBox(width: 3 * scale),
+                    Text(
+                      sub!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: _neon(13 * scale, opacity: 0.95),
+                    ),
                   ],
+                )
+              else if (showLabel)
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: _neon(12 * scale, opacity: 0.92),
+                  ),
                 ),
-              ),
             ],
           ),
         ),
-      ),
     );
   }
 
