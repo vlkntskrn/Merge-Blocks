@@ -1145,6 +1145,7 @@ void _handleDuplicateTap(Pos p) {
 
   int _dailyRewardForDay(int day) => _dailyRewards[(day - 1).clamp(0, _dailyRewards.length - 1)];
 
+  
   void _showDailyLoyaltyPopupIfNeeded() {
     if (_dailyBonusPopupShown || !mounted) return;
     final todayKey = _todayKey();
@@ -1173,6 +1174,7 @@ void _handleDuplicateTap(Pos p) {
       showDialog<void>(
         context: context,
         barrierDismissible: true,
+        barrierColor: Colors.black.withOpacity(0.66),
         builder: (ctx) {
           final isDe = lang == AppLang.de;
           void claim() {
@@ -1186,71 +1188,356 @@ void _handleDuplicateTap(Pos p) {
             if (mounted) setState(() {});
           }
 
+          Widget dayTile(int day) {
+            final r = _dailyRewardForDay(day);
+            final isActive = day == nextDay;
+            final isDone = day < nextDay;
+            final isLocked = day > nextDay;
+            final tileScale = isActive ? 1.08 : 1.0;
+            return Transform.scale(
+              scale: tileScale,
+              child: GestureDetector(
+                onTap: isActive ? claim : null,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  width: 88,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    gradient: isActive
+                        ? const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [Color(0xFF1BE7FF), Color(0xFF8A5BFF), Color(0xFFFF54D9)],
+                          )
+                        : LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Colors.white.withOpacity(isDone ? 0.07 : 0.03),
+                              Colors.white.withOpacity(isDone ? 0.12 : 0.05),
+                            ],
+                          ),
+                    border: Border.all(
+                      color: isActive
+                          ? Colors.white.withOpacity(0.78)
+                          : isDone
+                              ? Colors.white.withOpacity(0.22)
+                              : Colors.white.withOpacity(0.10),
+                    ),
+                    boxShadow: [
+                      if (isActive)
+                        BoxShadow(
+                          color: const Color(0xFF58E8FF).withOpacity(0.30),
+                          blurRadius: 18,
+                          spreadRadius: 1,
+                        ),
+                      if (isActive)
+                        BoxShadow(
+                          color: const Color(0xFFB66DFF).withOpacity(0.24),
+                          blurRadius: 22,
+                          spreadRadius: 2,
+                        ),
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.22),
+                        blurRadius: 10,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Stack(
+                    children: [
+                      if (isActive)
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: Align(
+                              alignment: const Alignment(-0.65, -0.85),
+                              child: Container(
+                                width: 42,
+                                height: 10,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(99),
+                                  color: Colors.white.withOpacity(0.28),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.white.withOpacity(0.18),
+                                      blurRadius: 10,
+                                      spreadRadius: 1,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            isDe ? 'TAG $day' : 'DAY $day',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(isActive ? 0.98 : 0.78),
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.7,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: RadialGradient(
+                                colors: isDone
+                                    ? [Colors.greenAccent.withOpacity(0.65), Colors.transparent]
+                                    : isLocked
+                                        ? [Colors.white.withOpacity(0.10), Colors.transparent]
+                                        : [const Color(0xFF8CFAFF).withOpacity(0.80), Colors.transparent],
+                              ),
+                            ),
+                            child: Icon(
+                              isDone ? Icons.check_circle_rounded : Icons.diamond_rounded,
+                              color: isDone
+                                  ? Colors.greenAccent
+                                  : isLocked
+                                      ? Colors.white.withOpacity(0.55)
+                                      : const Color(0xFFA8F9FF),
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            '$r',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                              shadows: [
+                                Shadow(
+                                  color: const Color(0xFF9DF8FF).withOpacity(isActive ? 0.9 : 0.35),
+                                  blurRadius: isActive ? 16 : 6,
+                                )
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
+
           return Dialog(
             backgroundColor: Colors.transparent,
-            insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(24),
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFF0C1224), Color(0xFF181033), Color(0xFF082632)],
+            insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 20),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0.92, end: 1.0),
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutBack,
+              builder: (context, s, child) => Transform.scale(scale: s, child: child),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(26),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF090F22), Color(0xFF140E2D), Color(0xFF071D2B)],
+                  ),
+                  border: Border.all(color: Colors.white.withOpacity(0.13), width: 1.1),
+                  boxShadow: [
+                    BoxShadow(color: const Color(0xFF53EEFF).withOpacity(0.14), blurRadius: 28, spreadRadius: 2),
+                    BoxShadow(color: const Color(0xFFB24EFF).withOpacity(0.10), blurRadius: 34, spreadRadius: 4),
+                    BoxShadow(color: Colors.black.withOpacity(0.42), blurRadius: 26, offset: const Offset(0, 16)),
+                  ],
                 ),
-                border: Border.all(color: Colors.white.withOpacity(0.14)),
-                boxShadow: [
-                  BoxShadow(color: const Color(0xFF62F2FF).withOpacity(0.20), blurRadius: 28, spreadRadius: 1),
-                  BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 26, offset: const Offset(0, 14)),
-                ],
-              ),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Text(isDe ? 'TÄGLICHER BONUS' : 'DAILY LOYALTY BONUS',
-                    style: _neon(16, opacity: 1).copyWith(fontWeight: FontWeight.w900, letterSpacing: 1.0)),
-                const SizedBox(height: 8),
-                Text(isDe ? 'Wähle deinen heutigen Bonus' : 'Claim your reward for today',
-                    style: TextStyle(color: Colors.white.withOpacity(0.78), fontSize: 13, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: List.generate(7, (i) {
-                    final day = i + 1;
-                    final r = _dailyRewardForDay(day);
-                    final isActive = day == nextDay;
-                    final isDone = day < nextDay;
-                    return GestureDetector(
-                      onTap: isActive ? claim : null,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        width: 86,
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                child: Stack(
+                  children: [
+                    Positioned(
+                      left: -26,
+                      top: -16,
+                      child: Container(
+                        width: 92,
+                        height: 92,
                         decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          gradient: isActive
-                              ? const LinearGradient(colors: [Color(0xFF21D4FD), Color(0xFFB721FF)])
-                              : LinearGradient(colors: [Colors.white.withOpacity(0.03), Colors.white.withOpacity(0.05)]),
-                          border: Border.all(color: isActive ? Colors.white.withOpacity(0.65) : Colors.white.withOpacity(0.08)),
-                          boxShadow: isActive ? [BoxShadow(color: const Color(0xFF58E8FF).withOpacity(0.35), blurRadius: 16)] : const [],
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(
+                            colors: [const Color(0xFF5BF2FF).withOpacity(0.35), Colors.transparent],
+                          ),
                         ),
-                        child: Column(mainAxisSize: MainAxisSize.min, children: [
-                          Text('DAY $day', style: TextStyle(color: Colors.white.withOpacity(isActive ? 0.95 : 0.70), fontSize: 10, fontWeight: FontWeight.w800)),
-                          const SizedBox(height: 4),
-                          Icon(isDone ? Icons.check_circle : Icons.diamond, color: isDone ? Colors.greenAccent : const Color(0xFF9EF7FF), size: 18),
-                          const SizedBox(height: 2),
-                          Text('$r', style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w900)),
-                        ]),
                       ),
-                    );
-                  }),
+                    ),
+                    Positioned(
+                      right: -30,
+                      top: -14,
+                      child: Container(
+                        width: 110,
+                        height: 110,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(
+                            colors: [const Color(0xFFB154FF).withOpacity(0.30), Colors.transparent],
+                          ),
+                        ),
+                      ),
+                    ),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 72,
+                              height: 72,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(18),
+                                gradient: const LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [Color(0xFF241A0A), Color(0xFF3B2A0E), Color(0xFF141414)],
+                                ),
+                                border: Border.all(color: Colors.white.withOpacity(0.10)),
+                                boxShadow: [
+                                  BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 18, offset: const Offset(0, 10)),
+                                ],
+                              ),
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Positioned(
+                                    bottom: 10,
+                                    child: Icon(Icons.shopping_bag_rounded, color: const Color(0xFF9B6B2C), size: 34),
+                                  ),
+                                  Positioned(
+                                    top: 8,
+                                    left: 12,
+                                    child: Icon(Icons.diamond_rounded, color: const Color(0xFF9EF7FF), size: 18),
+                                  ),
+                                  Positioned(
+                                    top: 12,
+                                    right: 10,
+                                    child: Icon(Icons.diamond_rounded, color: const Color(0xFFB983FF), size: 14),
+                                  ),
+                                  Positioned(
+                                    right: 16,
+                                    bottom: 18,
+                                    child: Icon(Icons.diamond_rounded, color: const Color(0xFF5FF7FF), size: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    isDe ? 'TÄGLICHE TREUE' : 'DAILY LOYALTY',
+                                    style: _neon(15, opacity: 1).copyWith(
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 1.1,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    isDe ? 'Premium Bonus wartet auf dich' : 'Your premium reward is ready',
+                                    style: TextStyle(
+                                      color: Colors.white.withOpacity(0.78),
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(99),
+                                      color: const Color(0xFFFF4FD8).withOpacity(0.15),
+                                      border: Border.all(color: const Color(0xFFFF67E1).withOpacity(0.45)),
+                                    ),
+                                    child: Text(
+                                      isDe
+                                          ? 'HEUTE: +$reward ELMAS'
+                                          : 'TODAY: +$reward DIAMONDS',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 0.7,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            isDe ? '7-Tage-Serie' : '7-Day Streak',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.78),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: List.generate(7, (i) => dayTile(i + 1)),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(color: Colors.white.withOpacity(0.18)),
+                                  foregroundColor: Colors.white.withOpacity(0.92),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                ),
+                                child: Text(isDe ? 'Später' : 'Later'),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: FilledButton(
+                                onPressed: claim,
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF7B5CFF),
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(Icons.diamond_rounded, size: 18),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      isDe ? 'Bonus holen' : 'Claim Reward',
+                                      style: const TextStyle(fontWeight: FontWeight.w900, letterSpacing: 0.3),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 10),
-                Row(children: [
-                  Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: Text(isDe ? 'Später' : 'Later'))),
-                  const SizedBox(width: 10),
-                  Expanded(child: FilledButton.icon(onPressed: claim, icon: const Icon(Icons.card_giftcard), label: Text(isDe ? 'Bonus holen' : 'Claim'))),
-                ]),
-              ]),
+              ),
             ),
           );
         },
@@ -1469,6 +1756,134 @@ void _handleDuplicateTap(Pos p) {
                   ),
                 ),
               ),
+
+            if (_comboMsg != null)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: AnimatedBuilder(
+                    animation: Listenable.merge([_comboCtrl, _shakeCtrl, _shimmerCtrl]),
+                    builder: (context, _) {
+                      final t = _comboCtrl.value.clamp(0.0, 1.0);
+                      final shake = (_shakeCtrl.value * 2 - 1);
+                      final shimmer = _shimmerCtrl.value;
+                      final comboN = _lastCombo.clamp(1, 20);
+                      final comboBoost = 1.0 + ((comboN - 5).clamp(0, 15)) * 0.09;
+                      final baseScale = (0.72 + Curves.elasticOut.transform(t) * 0.95) * comboBoost;
+                      final fade = (1.0 - (t - 0.78).clamp(0.0, 0.22) / 0.22).clamp(0.0, 1.0);
+                      final glow = 0.25 + (0.55 * t);
+                      return Opacity(
+                        opacity: fade,
+                        child: Center(
+                          child: Transform.translate(
+                            offset: Offset(sin(shake * pi * 2.0) * 7.0 * t, -12.0 - (18.0 * t)),
+                            child: Transform.scale(
+                              scale: baseScale,
+                              child: SizedBox(
+                                width: 220,
+                                height: 220,
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    Positioned.fill(
+                                      child: CustomPaint(
+                                        painter: _ComboShockwavePainter(
+                                          t: t,
+                                          shimmer: shimmer,
+                                          intensity: comboBoost,
+                                        ),
+                                      ),
+                                    ),
+                                    Container(
+                                      width: 146,
+                                      height: 146,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        gradient: RadialGradient(
+                                          colors: [
+                                            const Color(0x88E8FFFF),
+                                            const Color(0x887A5CFF),
+                                            Colors.transparent,
+                                          ],
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(color: const Color(0xFF67F0FF).withOpacity(glow), blurRadius: 34, spreadRadius: 4),
+                                          BoxShadow(color: const Color(0xFFB259FF).withOpacity(glow * 0.85), blurRadius: 42, spreadRadius: 7),
+                                        ],
+                                      ),
+                                    ),
+                                    Transform.rotate(
+                                      angle: (shimmer * 0.45) - 0.225,
+                                      child: Container(
+                                        width: 164,
+                                        height: 38,
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(99),
+                                          gradient: LinearGradient(
+                                            colors: [
+                                              Colors.transparent,
+                                              Colors.white.withOpacity(0.24),
+                                              Colors.transparent,
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    Container(
+                                      width: 176,
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(24),
+                                        gradient: const LinearGradient(
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                          colors: [Color(0xFF071025), Color(0xFF201044), Color(0xFF082A3A)],
+                                        ),
+                                        border: Border.all(color: Colors.white.withOpacity(0.30)),
+                                        boxShadow: [
+                                          BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 20, offset: const Offset(0, 10)),
+                                        ],
+                                      ),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            _comboMsg!,
+                                            textAlign: TextAlign.center,
+                                            style: _neon(
+                                              comboN >= 11 ? 18 : 16,
+                                              opacity: 1.0,
+                                            ).copyWith(
+                                              fontWeight: FontWeight.w900,
+                                              letterSpacing: 0.8,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '${comboN}x CHAIN',
+                                            style: TextStyle(
+                                              color: Colors.white.withOpacity(0.90),
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w800,
+                                              letterSpacing: 1.0,
+                                              shadows: [
+                                                Shadow(color: const Color(0xFF7DF9FF).withOpacity(0.55), blurRadius: 10),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
             ..._gemFlyFx.map((fx) => _GemFlyWidget(fx: fx)),
             ..._coinFlyFx.map((fx) => _CoinFlyWidget(fx: fx)),
           ],
@@ -1586,10 +2001,20 @@ void _handleDuplicateTap(Pos p) {
       key: key,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.14)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 16, offset: const Offset(0, 8))],
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withOpacity(0.07),
+            Colors.white.withOpacity(0.04),
+          ],
+        ),
+        border: Border.all(color: Colors.white.withOpacity(0.18), width: 1.1),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.38), blurRadius: 18, offset: const Offset(0, 10)),
+          BoxShadow(color: const Color(0xFF7DF9FF).withOpacity(0.07), blurRadius: 14),
+        ],
       ),
       child: child,
     );
@@ -1599,37 +2024,75 @@ void _handleDuplicateTap(Pos p) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 40,
-        height: 34,
+        width: 42,
+        height: 36,
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.10),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withOpacity(0.16)),
+          borderRadius: BorderRadius.circular(13),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.white.withOpacity(0.17),
+              Colors.white.withOpacity(0.07),
+            ],
+          ),
+          border: Border.all(color: Colors.white.withOpacity(0.20)),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.28), blurRadius: 10, offset: const Offset(0, 5)),
+          ],
         ),
-        child: Icon(icon, size: 18, color: Colors.white.withOpacity(0.92)),
+        child: Icon(icon, size: 19, color: Colors.white.withOpacity(0.95)),
       ),
     );
   }
 
   Widget _miniStatChip(String label, String value) {
+    final isGoal = label.toLowerCase().contains('goal') || label.toLowerCase().contains('next');
+    final accent = isGoal ? const Color(0xFFFFD76A) : const Color(0xFF7DF9FF);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withOpacity(0.12)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withOpacity(0.13),
+            Colors.white.withOpacity(0.05),
+          ],
+        ),
+        border: Border.all(color: accent.withOpacity(isGoal ? 0.35 : 0.20)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.28), blurRadius: 12, offset: const Offset(0, 6)),
+          BoxShadow(color: accent.withOpacity(isGoal ? 0.12 : 0.07), blurRadius: 14),
+        ],
       ),
       child: Column(
         children: [
-          Text(label, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 4),
-          Text(value, style: _neon(14, opacity: 0.95)),
+          Text(
+            label.toUpperCase(),
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.78),
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: _neon(14, opacity: 0.98).copyWith(
+              fontWeight: FontWeight.w900,
+              color: isGoal ? const Color(0xFFFFF0B0) : null,
+            ),
+          ),
         ],
       ),
     );
   }
 
-  
 Widget _buildBoard() {
   return LayoutBuilder(
     builder: (context, constraints) {
@@ -1805,18 +2268,26 @@ Widget _buildBoard() {
 
   Widget _buildBottomBar() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
-      decoration: BoxDecoration(color: const Color(0xFF06102C), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 20, offset: const Offset(0, -10))]),
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFF0A1638), Color(0xFF06102C)],
+        ),
+        border: const Border(top: BorderSide(color: Colors.white12)),
+        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 24, offset: Offset(0, -8))],
+      ),
       child: Row(children: [
-        Expanded(child: _actionButton(icon: swapMode ? Icons.close : Icons.swap_horiz, label: t('swap'), sub: '10', active: swapMode, onTap: _toggleSwap, showLabel: false)),
+        Expanded(child: _actionButton(icon: swapMode ? Icons.close : Icons.swap_horiz_rounded, label: t('swap'), sub: '10', active: swapMode, onTap: _toggleSwap, accent: const Color(0xFF74F9FF), showLabel: false)),
         const SizedBox(width: 6),
-        Expanded(child: _actionButton(icon: hammerMode ? Icons.close : Icons.gavel, label: t('hammer'), sub: '7', active: hammerMode, onTap: _toggleHammer, showLabel: false)),
+        Expanded(child: _actionButton(icon: hammerMode ? Icons.close : Icons.gavel_rounded, label: t('hammer'), sub: '7', active: hammerMode, onTap: _toggleHammer, accent: const Color(0xFFFFB870), showLabel: false)),
         const SizedBox(width: 6),
-        Expanded(child: _actionButton(icon: Icons.play_circle_outline, label: t('watchAd'), sub: '+10', onTap: _watchAdForDiamonds, showLabel: false)),
+        Expanded(child: _actionButton(icon: duplicateMode ? Icons.close : Icons.copy_rounded, label: t('duplicate'), sub: '12', active: duplicateMode, onTap: _toggleDuplicate, accent: const Color(0xFF9B8CFF), showLabel: false)),
         const SizedBox(width: 6),
-        Expanded(child: _actionButton(icon: Icons.shopping_bag_rounded, label: t('shop'), sub: '', onTap: _openShopSheet, iconOnly: true, showSub: false)),
+        Expanded(child: _actionButton(icon: Icons.play_circle_fill_rounded, label: t('watchAd'), sub: '+10', onTap: _watchAdForDiamonds, accent: const Color(0xFF61F2A7), showLabel: false)),
         const SizedBox(width: 6),
-        Expanded(child: _actionButton(icon: Icons.pause_rounded, label: t('pause'), sub: '', onTap: _openPauseDialog, iconOnly: true, showSub: false)),
+        Expanded(child: _actionButton(icon: Icons.shopping_bag_rounded, label: t('shop'), sub: '', onTap: _openShopSheet, accent: const Color(0xFFFFD76A), iconOnly: true, showSub: false)),
       ]),
     );
   }
@@ -1830,8 +2301,10 @@ Widget _buildBoard() {
     bool iconOnly = false,
     bool showLabel = true,
     bool showSub = true,
+    Color? accent,
   }) {
     final scale = uiScale;
+    final accentColor = accent ?? const Color(0xFF7DF9FF);
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -1839,13 +2312,13 @@ Widget _buildBoard() {
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(active ? 0.15 : 0.08),
           borderRadius: BorderRadius.circular(16 * scale),
-          border: Border.all(color: active ? const Color(0xFF7DF9FF).withOpacity(0.65) : Colors.white.withOpacity(0.10)),
-          boxShadow: [if (active) BoxShadow(color: const Color(0xFF7DF9FF).withOpacity(0.18), blurRadius: 16)],
+          border: Border.all(color: active ? accentColor.withOpacity(0.70) : Colors.white.withOpacity(0.10)),
+          boxShadow: [if (active) BoxShadow(color: accentColor.withOpacity(0.22), blurRadius: 16)],
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: (iconOnly ? 32 : 26) * scale, color: Colors.white.withOpacity(0.97)),
+            Icon(icon, size: (iconOnly ? 32 : 26) * scale, color: (active ? accentColor : Colors.white).withOpacity(0.97)),
             if (!iconOnly && showSub) ...[
               SizedBox(height: 2 * scale),
               Text(sub, style: _neon(12 * scale, opacity: 0.95)),
@@ -2107,6 +2580,48 @@ class _NeonPathPainter extends CustomPainter {
 }
 
 
+
+
+class _ComboShockwavePainter extends CustomPainter {
+  final double t;
+  final double shimmer;
+  final double intensity;
+  const _ComboShockwavePainter({
+    required this.t,
+    required this.shimmer,
+    required this.intensity,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final base = min(size.width, size.height) / 2;
+    for (int i = 0; i < 3; i++) {
+      final phase = ((t * 1.12) - i * 0.16).clamp(0.0, 1.0);
+      if (phase <= 0) continue;
+      final radius = base * (0.28 + phase * (0.55 + 0.08 * intensity));
+      final opacity = ((1.0 - phase) * (0.30 - i * 0.06)).clamp(0.0, 1.0);
+      final c = Color.lerp(const Color(0xFF67F0FF), const Color(0xFFB259FF), (0.35 + shimmer * 0.65).clamp(0.0, 1.0))!;
+      final paint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.0 - i * 0.6
+        ..color = c.withOpacity(opacity);
+      canvas.drawCircle(center, radius, paint);
+    }
+    final dot = Paint()..style = PaintingStyle.fill;
+    for (int i = 0; i < 16; i++) {
+      final a = (i / 16) * pi * 2 + (shimmer * pi * 2);
+      final rp = base * (0.18 + 0.55 * t) + (i % 3) * 8;
+      final p = center + Offset(cos(a) * rp, sin(a) * rp);
+      dot.color = Color.lerp(const Color(0xFF7DF9FF), const Color(0xFFFFD76A), (i % 5) / 5)!.withOpacity((0.18 + 0.35 * (1 - t)).clamp(0.0, 1.0));
+      canvas.drawCircle(p, 2.0 + (i % 2) * 1.3, dot);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ComboShockwavePainter oldDelegate) =>
+      oldDelegate.t != t || oldDelegate.shimmer != shimmer || oldDelegate.intensity != intensity;
+}
 class _TileFall {
   final BigInt v;
   final int fromR;
