@@ -1249,6 +1249,7 @@ void _handleDuplicateTap(Pos p) {
       body: SafeArea(
         bottom: false,
         child: Stack(
+          key: _rootStackKey,
           children: [
             Column(
               children: [
@@ -1838,7 +1839,7 @@ Widget _buildBoard() {
             ],
           ),
         ),
-      );
+    );
   }
 
   // ===== Sheets / dialogs =====
@@ -2014,6 +2015,39 @@ Color _darken(Color c, double amount) {
   final hsl = HSLColor.fromColor(c);
   final l = (hsl.lightness - amount).clamp(0.0, 1.0) as double;
   return hsl.withLightness(l).toColor();
+}
+
+class _GemFxDot extends StatefulWidget {
+  final _GemFlyFx fx; final VoidCallback onDone;
+  const _GemFxDot({required this.fx, required this.onDone});
+  @override State<_GemFxDot> createState() => _GemFxDotState();
+}
+class _GemFxDotState extends State<_GemFxDot> {
+  @override Widget build(BuildContext context) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now < widget.fx.startMs) { Future.delayed(Duration(milliseconds: widget.fx.startMs-now),(){ if(mounted) setState((){});}); return const SizedBox.shrink(); }
+    final p = (((now-widget.fx.startMs).clamp(0,760))/760.0).toDouble();
+    if (p >= 1.0) { WidgetsBinding.instance.addPostFrameCallback((_)=>widget.onDone()); return const SizedBox.shrink(); }
+    final pos = Offset.lerp(widget.fx.from, widget.fx.to, Curves.easeOutCubic.transform(p))! + Offset(0, -sin(p*pi)*34);
+    WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) setState(() {}); });
+    return Transform.translate(offset: pos, child: const Icon(Icons.diamond, size: 14, color: Color(0xFFB388FF)));
+  }
+}
+class _CoinFxDot extends StatefulWidget {
+  final _CoinFlyFx fx; final VoidCallback onDone;
+  const _CoinFxDot({required this.fx, required this.onDone});
+  @override State<_CoinFxDot> createState() => _CoinFxDotState();
+}
+class _CoinFxDotState extends State<_CoinFxDot> {
+  @override Widget build(BuildContext context) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now < widget.fx.startMs) { Future.delayed(Duration(milliseconds: widget.fx.startMs-now),(){ if(mounted) setState((){});}); return const SizedBox.shrink(); }
+    final p = (((now-widget.fx.startMs).clamp(0,660))/660.0).toDouble();
+    if (p >= 1.0) { WidgetsBinding.instance.addPostFrameCallback((_)=>widget.onDone()); return const SizedBox.shrink(); }
+    final pos = Offset.lerp(widget.fx.from, widget.fx.to, Curves.easeOutCubic.transform(p))! + Offset(0, -sin(p*pi)*26);
+    WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) setState(() {}); });
+    return Transform.translate(offset: pos, child: const Icon(Icons.monetization_on, size: 13, color: Color(0xFFFFD54F)));
+  }
 }
 
 @immutable
