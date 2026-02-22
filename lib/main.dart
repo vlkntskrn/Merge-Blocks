@@ -126,6 +126,8 @@ class _UltraGamePageState extends State<UltraGamePage> with TickerProviderStateM
   final List<_CoinFlyFx> _coinFlyFx = <_CoinFlyFx>[];
   int _coinFxId = 1;
   bool _launchOfferShown = false;
+  Timer? _comboTimer;
+  String? _comboMsg;
 
   // ===== Board config =====
   static const int cols = 5;
@@ -238,6 +240,7 @@ void _loadFromBlob(String blob) {
     _initFirstBoard();
     _clearPath();
     _recalcBest();
+    _animateCoinGain(6);
   }
 }
 
@@ -271,6 +274,14 @@ void _loadFromBlob(String blob) {
 
 
 Random _rng = Random();
+  bool _startupOfferShown = false;
+  final List<({int gems, int baseUsd, int discountedUsd, String tag, String title})> _shopOffers = const [
+    (gems: 250, baseUsd: 15, discountedUsd: 9, tag: 'ROYAL DROP', title: 'Sana Özel Teklif'),
+    (gems: 500, baseUsd: 29, discountedUsd: 17, tag: 'LUXE BAG', title: 'VIP Elmas Paketi'),
+    (gems: 1000, baseUsd: 59, discountedUsd: 35, tag: 'MEGA VAULT', title: 'Ultra Premium Teklif'),
+    (gems: 150, baseUsd: 10, discountedUsd: 6, tag: 'FLASH DEAL', title: 'Bugüne Özel'),
+    (gems: 750, baseUsd: 39, discountedUsd: 23, tag: 'GOLDEN SALE', title: 'Sana Özel İndirim'),
+  ];
 
   late List<List<BigInt?>> grid;
 
@@ -401,6 +412,7 @@ Random _rng = Random();
       _startAutoSave();
       if (!mounted) return;
       setState(() => _booting = false);
+      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _showLaunchOfferIfNeeded(); });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _showLaunchOfferIfNeeded();
       });
@@ -854,7 +866,21 @@ void _collapseAndFill() {
     } else {
       msg = lang == AppLang.de ? 'SUPER KOMBO!' : 'SUPER COMBO!';
     }
+
+    _comboTimer?.cancel();
+    _comboMsg = msg;
+    _comboCtrl.forward(from: 0);
+    _shakeCtrl.forward(from: 0);
+    _shimmerCtrl.repeat(period: const Duration(milliseconds: 800));
     _showToast(msg);
+
+    _comboTimer = Timer(const Duration(milliseconds: 1050), () {
+      if (!mounted) return;
+      _comboCtrl.reverse();
+      _shakeCtrl.reverse();
+      _shimmerCtrl.stop();
+      setState(() => _comboMsg = null);
+    });
   }
 
   void _maybeShowNextLevelReward() {
@@ -990,6 +1016,8 @@ void _handleDuplicateTap(Pos p) {
   setState(() {});
 }
 
+  void _watchAdForDiamonds() => _watchAdReward();
+
   void _watchAdReward() {
   diamonds += 10;
   _animateDiamondGain(10);
@@ -1094,67 +1122,70 @@ void _handleDuplicateTap(Pos p) {
 
 
   void _showLaunchOfferIfNeeded() {
-    if (_launchOfferShown || !mounted) return;
-    _launchOfferShown = true;
-    final packs = const <({int gems, int oldUsd})>[
-      (gems: 100, oldUsd: 5),
-      (gems: 250, oldUsd: 15),
-      (gems: 500, oldUsd: 29),
-      (gems: 1000, oldUsd: 59),
-    ];
-    final o = packs[DateTime.now().millisecond % packs.length];
-    final newUsd = (o.oldUsd * 0.6).round();
-    showDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      barrierColor: Colors.black.withOpacity(0.62),
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(26),
-            gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF09163E), Color(0xFF120B2D)]),
-            border: Border.all(color: Colors.white.withOpacity(0.14)),
-            boxShadow: const [BoxShadow(color: Color(0x8027E6FF), blurRadius: 30), BoxShadow(color: Color(0x668A5BFF), blurRadius: 44)],
-          ),
-          child: Padding(
+    if (_startupOfferShown || !mounted) return;
+    _startupOfferShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final o = _shopOffers[_rng.nextInt(_shopOffers.length)];
+      showDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (ctx) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+          child: Container(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(26),
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF070E28), Color(0xFF1A0E45), Color(0xFF08243E)],
+              ),
+              border: Border.all(color: Colors.white.withOpacity(0.18)),
+              boxShadow: const [
+                BoxShadow(color: Color(0xAA00E5FF), blurRadius: 26),
+                BoxShadow(color: Color(0x66FF4D8D), blurRadius: 38),
+              ],
+            ),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Stack(alignment: Alignment.center, children: [
-                Container(height: 138, decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), gradient: LinearGradient(colors:[const Color(0xFF27E6FF).withOpacity(0.12),const Color(0xFF8A5BFF).withOpacity(0.10),const Color(0xFFFF4D8D).withOpacity(0.10)]))),
-                Positioned(top: 2, right: 4, child: Transform.rotate(angle: 0.12, child: Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), decoration: BoxDecoration(gradient: const LinearGradient(colors:[Color(0xFFFFC107),Color(0xFFFF6F00)]), borderRadius: BorderRadius.circular(999)), child: const Text('%40 DISCOUNT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: 0.8, fontSize: 11))))),
-                TweenAnimationBuilder<double>(
-                  tween: Tween(begin: 0.86, end: 1.0), duration: const Duration(milliseconds: 900), curve: Curves.elasticOut,
-                  builder: (c,v,_) => Transform.scale(scale: v, child: Stack(alignment: Alignment.center, children: [
-                    Container(width: 92, height: 76, decoration: BoxDecoration(color: const Color(0xFF7A4A23), borderRadius: BorderRadius.circular(18), border: Border.all(color: const Color(0xFFB8864B), width: 1.6))),
-                    Positioned(top: 18, child: Container(width: 70, height: 14, decoration: BoxDecoration(color: const Color(0xFF9D6233), borderRadius: BorderRadius.circular(999), border: Border.all(color: const Color(0xFFC18C57), width: 1.1)))),
-                    Positioned(top: 10, child: Container(width: 36, height: 12, decoration: BoxDecoration(color: const Color(0xFF6B3C1E), borderRadius: BorderRadius.circular(999)))),
-                    ...List.generate(11, (i) { final dx=(-38 + i*8.0)+(i.isEven?2:-2); final dy=i<4?-20.0:(i<8?-4.0:12.0); final sz=i%3==0?18.0:15.0; const cols=[Color(0xFF90CAF9),Color(0xFFB388FF),Color(0xFF7DF9FF)]; return Positioned(left: 46+dx, top: 42+dy, child: Icon(Icons.diamond, size: sz, color: cols[i%3])); }),
-                  ])),
-                ),
-              ]),
+              Text(o.title, textAlign: TextAlign.center, style: _neon(20, opacity: 1).copyWith(fontWeight: FontWeight.w900, letterSpacing: 1.0, fontStyle: FontStyle.italic)),
               const SizedBox(height: 10),
-              Text('Sana Özel Teklifimiz', style: _neon(19, opacity: 0.99).copyWith(letterSpacing: 0.4, fontStyle: FontStyle.italic)),
-              const SizedBox(height: 6),
-              Text('${o.gems} ELMAS', style: _neon(23, opacity: 1.0).copyWith(fontWeight: FontWeight.w900, letterSpacing: 1.3)),
+              SizedBox(
+                height: 150,
+                child: Stack(alignment: Alignment.center, children: [
+                  Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), gradient: LinearGradient(colors: [Colors.white.withOpacity(0.04), const Color(0xFFFFB703).withOpacity(0.08)]))),
+                  Positioned(top: 6, right: 6, child: Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: const Color(0xFFFF2D55).withOpacity(0.92), borderRadius: BorderRadius.circular(999)), child: const Text('%40 DISCOUNT', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: .8)))),
+                  Positioned(left: 12, bottom: 8, child: Transform.rotate(angle: -0.18, child: Container(width: 86, height: 72, decoration: BoxDecoration(color: const Color(0xFF5B3219), borderRadius: BorderRadius.circular(14), boxShadow: const [BoxShadow(color: Color(0x55000000), blurRadius: 10)])))),
+                  ...List.generate(18, (i) {
+                    final x = 86 + (_rng.nextDouble() * 140);
+                    final y = 20 + (_rng.nextDouble() * 96);
+                    final sz = 12 + _rng.nextDouble() * 10;
+                    const cols = [Color(0xFF76E4FF), Color(0xFFA7F3FF), Color(0xFFB47CFF), Color(0xFFFF7EDB)];
+                    return Positioned(left: x, top: y, child: Transform.rotate(angle: _rng.nextDouble() * 0.9 - 0.45, child: Icon(Icons.diamond, size: sz, color: cols[i % cols.length])));
+                  }),
+                  Positioned(left: 112, top: 16, child: Text(o.tag, style: _neon(12, opacity: 0.95).copyWith(letterSpacing: 1.4, fontWeight: FontWeight.w900))),
+                ]),
+              ),
+              const SizedBox(height: 10),
+              Text('${o.gems} ELMAS', style: _neon(24, opacity: 1).copyWith(fontWeight: FontWeight.w900, letterSpacing: 1.2)),
               const SizedBox(height: 6),
               Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Text('\$${o.oldUsd}', style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 15, fontWeight: FontWeight.w700, decoration: TextDecoration.lineThrough, decorationColor: Colors.white38)),
-                const SizedBox(width: 10),
-                Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), gradient: const LinearGradient(colors:[Color(0xFF1DE9B6),Color(0xFF00B0FF)])), child: Text('\$${newUsd}', style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: 0.5))),
-              ]),
-              const SizedBox(height: 12),
-              Row(children: [
-                Expanded(child: OutlinedButton(onPressed: ()=>Navigator.pop(ctx), child: const Text('Later'))),
+                Text('\$${o.baseUsd}', style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 15, fontWeight: FontWeight.w800, decoration: TextDecoration.lineThrough)),
                 const SizedBox(width: 8),
-                Expanded(child: FilledButton(onPressed: () { Navigator.pop(ctx); setState(() => diamonds += o.gems); _animateDiamondGain(o.gems); _saveToBlob(); _showToast('+${o.gems} 💎 OFFER'); }, child: const Text('Buy Now'))),
+                Text('\$${o.discountedUsd}', style: _neon(18, opacity: 1).copyWith(fontWeight: FontWeight.w900)),
+              ]),
+              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Later'))),
+                const SizedBox(width: 10),
+                Expanded(child: FilledButton(onPressed: () { Navigator.pop(ctx); diamonds += o.gems; _animateDiamondGain(o.gems); _saveToBlob(); _showToast('+${o.gems} 💎 OFFER'); setState(() {}); }, child: const Text('Buy Now'))),
               ]),
             ]),
           ),
         ),
-      ),
-    );
+      );
+    });
   }
 
   void _playChainNote(int index) {
@@ -1703,146 +1734,61 @@ Widget _buildBoard() {
 
 
   Widget _buildBottomBar() {
-  return Container(
-    padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
-    decoration: BoxDecoration(
-      color: const Color(0xFF06102C),
-      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 20, offset: const Offset(0, -10))],
-    ),
-    child: Row(
-      children: [
-        Expanded(
-          child: _actionButton(
-            icon: swapMode ? Icons.close : Icons.swap_horiz,
-            label: t('swap'),
-            sub: '10',
-            active: swapMode,
-            onTap: _toggleSwap,
-            showLabel: false,
-          ),
-        ),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+      decoration: BoxDecoration(color: const Color(0xFF06102C), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 20, offset: const Offset(0, -10))]),
+      child: Row(children: [
+        Expanded(child: _actionButton(icon: swapMode ? Icons.close : Icons.swap_horiz, label: t('swap'), sub: '10', active: swapMode, onTap: _toggleSwap, showLabel: false)),
         const SizedBox(width: 6),
-        Expanded(
-          child: _actionButton(
-            icon: hammerMode ? Icons.close : Icons.gavel,
-            label: t('hammer'),
-            sub: '7',
-            active: hammerMode,
-            onTap: _toggleHammer,
-            showLabel: false,
-          ),
-        ),
+        Expanded(child: _actionButton(icon: hammerMode ? Icons.close : Icons.gavel, label: t('hammer'), sub: '7', active: hammerMode, onTap: _toggleHammer, showLabel: false)),
         const SizedBox(width: 6),
-        Expanded(
-          child: _actionButton(
-            icon: Icons.smart_display,
-            label: t('watchAd'),
-            sub: '+10',
-            active: false,
-            onTap: _watchAdReward,
-            showLabel: false,
-          ),
-        ),
+        Expanded(child: _actionButton(icon: Icons.play_circle_outline, label: t('watchAd'), sub: '+10', onTap: _watchAdForDiamonds, showLabel: false)),
         const SizedBox(width: 6),
-        Expanded(
-          child: _actionButton(
-            icon: duplicateMode ? Icons.close : Icons.copy,
-            label: t('duplicate'),
-            sub: '20',
-            active: duplicateMode,
-            onTap: _toggleDuplicate,
-            showLabel: false,
-          ),
-        ),
+        Expanded(child: _actionButton(icon: Icons.shopping_bag_rounded, label: t('shop'), sub: '', onTap: _openShopSheet, iconOnly: true, showSub: false)),
         const SizedBox(width: 6),
-        Expanded(
-          child: _actionButton(
-            icon: Icons.shopping_cart,
-            label: t('shop'),
-            sub: '',
-            active: false,
-            onTap: _openShopSheet,
-            showLabel: false,
-          ),
-        ),
-      ],
-    ),
-  );
-}
+        Expanded(child: _actionButton(icon: Icons.pause_rounded, label: t('pause'), sub: '', onTap: _openPauseDialog, iconOnly: true, showSub: false)),
+      ]),
+    );
+  }
 
   Widget _actionButton({
     required IconData icon,
     required String label,
-    String? sub,
-    required bool active,
+    required String sub,
     required VoidCallback onTap,
-    double? height,
+    bool active = false,
+    bool iconOnly = false,
     bool showLabel = true,
     bool showSub = true,
   }) {
     final scale = uiScale;
-    final h = height ?? (74.0 * scale);
-
     return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          height: h,
-          margin: EdgeInsets.symmetric(horizontal: 5 * scale),
-          padding: EdgeInsets.symmetric(horizontal: 10 * scale, vertical: 10 * scale),
-          decoration: BoxDecoration(
-            color: active ? const Color(0xFF1B2A57).withOpacity(0.90) : const Color(0xFF0E1A3B).withOpacity(0.78),
-            borderRadius: BorderRadius.circular(16 * scale),
-            border: Border.all(color: active ? const Color(0xFF7DF9FF).withOpacity(0.60) : Colors.white.withOpacity(0.06)),
-            boxShadow: [
-              if (active)
-                BoxShadow(
-                  color: const Color(0xFF7DF9FF).withOpacity(0.20),
-                  blurRadius: 18 * scale,
-                  spreadRadius: 1,
-                )
-            ],
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 32 * scale, color: Colors.white.withOpacity(0.98)),
-              SizedBox(height: 4 * scale),
-              if (showSub && sub != null && sub!.isNotEmpty)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.diamond, size: 14, color: Color(0xFFB388FF)),
-                    SizedBox(width: 3 * scale),
-                    Text(
-                      sub!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: _neon(13 * scale, opacity: 0.95),
-                    ),
-                  ],
-                )
-              else if (showLabel)
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: _neon(12 * scale, opacity: 0.92),
-                  ),
-                ),
-            ],
-          ),
+      onTap: onTap,
+      child: Container(
+        height: 58 * scale,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(active ? 0.15 : 0.08),
+          borderRadius: BorderRadius.circular(16 * scale),
+          border: Border.all(color: active ? const Color(0xFF7DF9FF).withOpacity(0.65) : Colors.white.withOpacity(0.10)),
+          boxShadow: [if (active) BoxShadow(color: const Color(0xFF7DF9FF).withOpacity(0.18), blurRadius: 16)],
         ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: (iconOnly ? 32 : 26) * scale, color: Colors.white.withOpacity(0.97)),
+            if (!iconOnly && showSub) ...[
+              SizedBox(height: 2 * scale),
+              Text(sub, style: _neon(12 * scale, opacity: 0.95)),
+            ] else if (!iconOnly && showLabel) ...[
+              SizedBox(height: 2 * scale),
+              Text(label, style: _neon(11 * scale, opacity: 0.9)),
+            ],
+          ],
+        ),
+      ),
     );
   }
 
-  // ===== Sheets / dialogs =====
 
   void _openShopSheet() {
     showModalBottomSheet(
@@ -1850,70 +1796,43 @@ Widget _buildBoard() {
       backgroundColor: const Color(0xFF06102C),
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
       builder: (ctx) {
-        final offers = const [
-          (50, 2),
-          (100, 3),
-          (250, 5),
-          (500, 8),
-          (1000, 15),
-        ];
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(t('shopTitle'), style: _neon(20, opacity: 0.98)),
-              const SizedBox(height: 12),
-              ...offers.map((o) {
-                final gems = o.$1;
-                final usd = o.$2;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: GestureDetector(
-                    onTap: () {
-                      setState(() => diamonds += gems);
-                      Navigator.pop(ctx);
-                      _animateDiamondGain(gems);
-                      _saveToBlob();
-                      _showToast('+$gems 💎');
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.06),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: Colors.white.withOpacity(0.12)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.diamond, color: Color(0xFFB388FF)),
-                          const SizedBox(width: 10),
-                          Text('$gems 💎', style: _neon(16)),
-                          const Spacer(),
-                          Text('\$$usd', style: _neon(16, opacity: 0.9)),
-                          const SizedBox(width: 10),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: Colors.white.withOpacity(0.14)),
-                            ),
-                            child: Text(t('buy'), style: _neon(12, opacity: 0.9)),
-                          ),
-                        ],
-                      ),
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Diamond Shop', style: _neon(18, opacity: 0.98)),
+                const SizedBox(height: 10),
+                ..._shopOffers.map((o) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white.withOpacity(0.10)),
                     ),
+                    child: Row(children: [
+                      const Icon(Icons.diamond, color: Color(0xFF8CF3FF)),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text('${o.gems} • \$${o.discountedUsd}', style: _neon(13, opacity: 0.95))),
+                      FilledButton(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          diamonds += o.gems;
+                          _animateDiamondGain(o.gems);
+                          _saveToBlob();
+                          _showToast('+${o.gems} 💎');
+                          setState(() {});
+                        },
+                        child: const Text('Buy'),
+                      ),
+                    ]),
                   ),
-                );
-              }),
-              const SizedBox(height: 6),
-              Text(
-                'Note: This shop UI is a placeholder. (Real Google Play Billing can be integrated in the full project.)',
-                style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 11, fontWeight: FontWeight.w600),
-                textAlign: TextAlign.center,
-              ),
-            ],
+                )),
+              ],
+            ),
           ),
         );
       },
