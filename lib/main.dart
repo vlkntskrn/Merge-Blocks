@@ -176,71 +176,75 @@ void _saveToBlob() {
     'levelIdx': levelIdx,
     'diamonds': diamonds,
     'swaps': swaps,
-    // Store as string for forward/backward compatibility.
     'lang': lang.name,
+    'dailyStreak': _dailyStreak,
+    'dailyLastClaim': _dailyLastClaimDate,
   };
   _saveBlob.value = jsonEncode(data);
-
   _saveToPrefs();
 }
 
 
-void _loadFromBlob(String blob) {
+void _loadFromBlob(String raw) {
   try {
-    final Map<String, dynamic> data = jsonDecode(blob) as Map<String, dynamic>;
-    final int sr = (data['rows'] as num?)?.toInt() ?? rows;
-    final int sc = (data['cols'] as num?)?.toInt() ?? cols;
-    final List<dynamic>? flat = data['grid'] as List<dynamic>?;
-    if (flat != null && sr == rows && sc == cols && flat.length == rows * cols) {
-      grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
-      for (int r = 0; r < rows; r++) {
-        for (int c = 0; c < cols; c++) {
-          final idx = r * cols + c;
-          final v = flat[idx];
-          grid[r][c] = (v == null) ? null : BigInt.parse(v.toString());
-        }
-      }
-    } else {
-      grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
-      _initFirstBoard();
-    }
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) return;
+    final data = Map<String, dynamic>.from(decoded as Map);
 
-    score = BigInt.parse((data['score'] ?? '0').toString());
-    best = BigInt.parse((data['best'] ?? '0').toString());
-    levelIdx = (data['levelIdx'] as num?)?.toInt() ?? 1;
-    diamonds = (data['diamonds'] as num?)?.toInt() ?? 0;
-    swaps = (data['swaps'] as num?)?.toInt() ?? 0;
+    final gridAny = data['grid'];
+    if (gridAny is! List) return;
 
-    // Language migration:
-    // - New format: string 'en'/'de'
-    // - Old format: int index (from previous builds)
-    // - If an older save stored 'tr' (removed), fall back to English.
-    final rawLang = data['lang'];
-    if (rawLang is String) {
-      if (rawLang == 'de') {
-        lang = AppLang.de;
-      } else {
-        // includes 'en' and any unknown (incl. legacy 'tr')
-        lang = AppLang.en;
-      }
-    } else {
-      final li = (rawLang as num?)?.toInt();
-      if (li != null && li >= 0 && li < AppLang.values.length) {
-        lang = AppLang.values[li];
-      } else {
-        lang = AppLang.en;
+    final nextGrid = List<List<BigInt?>>.generate(
+      rows,
+      (_) => List<BigInt?>.filled(cols, null, growable: false),
+      growable: false,
+    );
+
+    for (int i = 0; i < rows * cols && i < gridAny.length; i++) {
+      final cell = gridAny[i];
+      if (cell == null) continue;
+      try {
+        nextGrid[i ~/ cols][i % cols] = BigInt.parse(cell.toString());
+      } catch (_) {
+        nextGrid[i ~/ cols][i % cols] = null;
       }
     }
 
-    _clearPath();
-    _recalcBest();
+    grid = nextGrid;
+
+    final scoreRaw = data['score'];
+    if (scoreRaw != null) {
+      try { score = BigInt.parse(scoreRaw.toString()); } catch (_) {}
+    }
+
+    final bestRaw = data['best'];
+    if (bestRaw != null) {
+      try { best = BigInt.parse(bestRaw.toString()); } catch (_) {}
+    }
+
+    final levelRaw = data['levelIdx'];
+    if (levelRaw is num) levelIdx = levelRaw.toInt();
+
+    final diaRaw = data['diamonds'];
+    if (diaRaw is num) diamonds = diaRaw.toInt();
+
+    final swapsRaw = data['swaps'];
+    if (swapsRaw is num) swaps = swapsRaw.toInt();
+
+    final langRaw = data['lang']?.toString();
+    if (langRaw != null) {
+      lang = (langRaw == AppLang.de.name) ? AppLang.de : AppLang.en;
+    }
+
+    final streakRaw = data['dailyStreak'];
+    if (streakRaw is num) _dailyStreak = streakRaw.toInt();
+
+    final lastClaimRaw = data['dailyLastClaim'];
+    _dailyLastClaimDate = lastClaimRaw?.toString();
+
     if (mounted) setState(() {});
   } catch (_) {
-    grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
-    _initFirstBoard();
-    _clearPath();
-    _recalcBest();
-    _animateCoinGain(6);
+    // ignore corrupted save blob
   }
 }
 
@@ -275,6 +279,10 @@ void _loadFromBlob(String blob) {
 
 Random _rng = Random();
   bool _startupOfferShown = false;
+  bool _dailyBonusPopupShown = false;
+  int _dailyStreak = 0;
+  String? _dailyLastClaimDate;
+  final List<int> _dailyRewards = const [7, 10, 15, 25, 35, 45, 60];
   final List<({int gems, int baseUsd, int discountedUsd, String tag, String title})> _shopOffers = const [
     (gems: 250, baseUsd: 15, discountedUsd: 9, tag: 'ROYAL DROP', title: 'Sana Özel Teklif'),
     (gems: 500, baseUsd: 29, discountedUsd: 17, tag: 'LUXE BAG', title: 'VIP Elmas Paketi'),
@@ -412,9 +420,9 @@ Random _rng = Random();
       _startAutoSave();
       if (!mounted) return;
       setState(() => _booting = false);
-      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _showLaunchOfferIfNeeded(); });
+      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _showDailyLoyaltyPopupIfNeeded(); });
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _showLaunchOfferIfNeeded();
+        if (mounted) _showDailyLoyaltyPopupIfNeeded();
       });
     }();
   }
@@ -1121,69 +1129,131 @@ void _handleDuplicateTap(Pos p) {
 
 
 
-  void _showLaunchOfferIfNeeded() {
-    if (_startupOfferShown || !mounted) return;
-    _startupOfferShown = true;
+  void _showLaunchOfferIfNeeded() => _showDailyLoyaltyPopupIfNeeded();
+
+  String _todayKey() {
+    final d = DateTime.now();
+    final mm = d.month.toString().padLeft(2, '0');
+    final dd = d.day.toString().padLeft(2, '0');
+    return '${d.year}-$mm-$dd';
+  }
+
+  DateTime? _parseYmd(String? v) {
+    if (v == null || v.isEmpty) return null;
+    try { return DateTime.parse(v); } catch (_) { return null; }
+  }
+
+  int _dailyRewardForDay(int day) => _dailyRewards[(day - 1).clamp(0, _dailyRewards.length - 1)];
+
+  void _showDailyLoyaltyPopupIfNeeded() {
+    if (_dailyBonusPopupShown || !mounted) return;
+    final todayKey = _todayKey();
+    if (_dailyLastClaimDate == todayKey) return;
+    _dailyBonusPopupShown = true;
+
+    final now = DateTime.now();
+    final prev = _parseYmd(_dailyLastClaimDate);
+    int nextDay = 1;
+    if (prev != null) {
+      final prevDate = DateTime(prev.year, prev.month, prev.day);
+      final nowDate = DateTime(now.year, now.month, now.day);
+      final diff = nowDate.difference(prevDate).inDays;
+      if (diff == 1) {
+        nextDay = (_dailyStreak + 1).clamp(1, 7);
+      } else if (diff > 1) {
+        nextDay = 1;
+      } else {
+        return;
+      }
+    }
+
+    final reward = _dailyRewardForDay(nextDay);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final o = _shopOffers[_rng.nextInt(_shopOffers.length)];
       showDialog<void>(
         context: context,
         barrierDismissible: true,
-        builder: (ctx) => Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(26),
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFF070E28), Color(0xFF1A0E45), Color(0xFF08243E)],
+        builder: (ctx) {
+          final isDe = lang == AppLang.de;
+          void claim() {
+            Navigator.pop(ctx);
+            diamonds += reward;
+            _dailyStreak = nextDay;
+            _dailyLastClaimDate = todayKey;
+            _animateDiamondGain(reward);
+            _showToast('+$reward 💎');
+            _saveToBlob();
+            if (mounted) setState(() {});
+          }
+
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(24),
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF0C1224), Color(0xFF181033), Color(0xFF082632)],
+                ),
+                border: Border.all(color: Colors.white.withOpacity(0.14)),
+                boxShadow: [
+                  BoxShadow(color: const Color(0xFF62F2FF).withOpacity(0.20), blurRadius: 28, spreadRadius: 1),
+                  BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 26, offset: const Offset(0, 14)),
+                ],
               ),
-              border: Border.all(color: Colors.white.withOpacity(0.18)),
-              boxShadow: const [
-                BoxShadow(color: Color(0xAA00E5FF), blurRadius: 26),
-                BoxShadow(color: Color(0x66FF4D8D), blurRadius: 38),
-              ],
-            ),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Text(o.title, textAlign: TextAlign.center, style: _neon(20, opacity: 1).copyWith(fontWeight: FontWeight.w900, letterSpacing: 1.0, fontStyle: FontStyle.italic)),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 150,
-                child: Stack(alignment: Alignment.center, children: [
-                  Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), gradient: LinearGradient(colors: [Colors.white.withOpacity(0.04), const Color(0xFFFFB703).withOpacity(0.08)]))),
-                  Positioned(top: 6, right: 6, child: Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: const Color(0xFFFF2D55).withOpacity(0.92), borderRadius: BorderRadius.circular(999)), child: const Text('%40 DISCOUNT', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: .8)))),
-                  Positioned(left: 12, bottom: 8, child: Transform.rotate(angle: -0.18, child: Container(width: 86, height: 72, decoration: BoxDecoration(color: const Color(0xFF5B3219), borderRadius: BorderRadius.circular(14), boxShadow: const [BoxShadow(color: Color(0x55000000), blurRadius: 10)])))),
-                  ...List.generate(18, (i) {
-                    final x = 86 + (_rng.nextDouble() * 140);
-                    final y = 20 + (_rng.nextDouble() * 96);
-                    final sz = 12 + _rng.nextDouble() * 10;
-                    const cols = [Color(0xFF76E4FF), Color(0xFFA7F3FF), Color(0xFFB47CFF), Color(0xFFFF7EDB)];
-                    return Positioned(left: x, top: y, child: Transform.rotate(angle: _rng.nextDouble() * 0.9 - 0.45, child: Icon(Icons.diamond, size: sz, color: cols[i % cols.length])));
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Text(isDe ? 'TÄGLICHER BONUS' : 'DAILY LOYALTY BONUS',
+                    style: _neon(16, opacity: 1).copyWith(fontWeight: FontWeight.w900, letterSpacing: 1.0)),
+                const SizedBox(height: 8),
+                Text(isDe ? 'Wähle deinen heutigen Bonus' : 'Claim your reward for today',
+                    style: TextStyle(color: Colors.white.withOpacity(0.78), fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: List.generate(7, (i) {
+                    final day = i + 1;
+                    final r = _dailyRewardForDay(day);
+                    final isActive = day == nextDay;
+                    final isDone = day < nextDay;
+                    return GestureDetector(
+                      onTap: isActive ? claim : null,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: 86,
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          gradient: isActive
+                              ? const LinearGradient(colors: [Color(0xFF21D4FD), Color(0xFFB721FF)])
+                              : LinearGradient(colors: [Colors.white.withOpacity(0.03), Colors.white.withOpacity(0.05)]),
+                          border: Border.all(color: isActive ? Colors.white.withOpacity(0.65) : Colors.white.withOpacity(0.08)),
+                          boxShadow: isActive ? [BoxShadow(color: const Color(0xFF58E8FF).withOpacity(0.35), blurRadius: 16)] : const [],
+                        ),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          Text('DAY $day', style: TextStyle(color: Colors.white.withOpacity(isActive ? 0.95 : 0.70), fontSize: 10, fontWeight: FontWeight.w800)),
+                          const SizedBox(height: 4),
+                          Icon(isDone ? Icons.check_circle : Icons.diamond, color: isDone ? Colors.greenAccent : const Color(0xFF9EF7FF), size: 18),
+                          const SizedBox(height: 2),
+                          Text('$r', style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w900)),
+                        ]),
+                      ),
+                    );
                   }),
-                  Positioned(left: 112, top: 16, child: Text(o.tag, style: _neon(12, opacity: 0.95).copyWith(letterSpacing: 1.4, fontWeight: FontWeight.w900))),
+                ),
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: Text(isDe ? 'Später' : 'Later'))),
+                  const SizedBox(width: 10),
+                  Expanded(child: FilledButton.icon(onPressed: claim, icon: const Icon(Icons.card_giftcard), label: Text(isDe ? 'Bonus holen' : 'Claim'))),
                 ]),
-              ),
-              const SizedBox(height: 10),
-              Text('${o.gems} ELMAS', style: _neon(24, opacity: 1).copyWith(fontWeight: FontWeight.w900, letterSpacing: 1.2)),
-              const SizedBox(height: 6),
-              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Text('\$${o.baseUsd}', style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 15, fontWeight: FontWeight.w800, decoration: TextDecoration.lineThrough)),
-                const SizedBox(width: 8),
-                Text('\$${o.discountedUsd}', style: _neon(18, opacity: 1).copyWith(fontWeight: FontWeight.w900)),
               ]),
-              const SizedBox(height: 10),
-              Row(children: [
-                Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Later'))),
-                const SizedBox(width: 10),
-                Expanded(child: FilledButton(onPressed: () { Navigator.pop(ctx); diamonds += o.gems; _animateDiamondGain(o.gems); _saveToBlob(); _showToast('+${o.gems} 💎 OFFER'); setState(() {}); }, child: const Text('Buy Now'))),
-              ]),
-            ]),
-          ),
-        ),
+            ),
+          );
+        },
       );
     });
   }
