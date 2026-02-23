@@ -400,7 +400,7 @@ Random _rng = Random();
     _toastCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
     _toastOpacity = CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOut, reverseCurve: Curves.easeIn);
     _toastScale = Tween<double>(begin: 0.92, end: 1.0).animate(CurvedAnimation(parent: _toastCtrl, curve: Curves.easeOutBack, reverseCurve: Curves.easeIn));
-    _comboCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
+    _comboCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
     _shakeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
     _shimmerCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
 
@@ -893,11 +893,11 @@ void _collapseAndFill() {
     _shimmerCtrl.repeat(period: const Duration(milliseconds: 900));
     // Small toast removed to avoid double-combo animation feeling.
 
-    _comboTimer = Timer(const Duration(milliseconds: 2100), () {
+    _comboTimer = Timer(const Duration(milliseconds: 4200), () {
       if (!mounted) return;
-      _comboCtrl.reverse();
-      _shakeCtrl.reverse();
       _shimmerCtrl.stop();
+      _comboCtrl.stop();
+      _shakeCtrl.stop();
       setState(() => _comboMsg = null);
     });
   }
@@ -2365,7 +2365,14 @@ Widget _buildBoard() {
             Icon(icon, size: (iconOnly ? 32 : 26) * scale, color: (active ? accentColor : Colors.white).withOpacity(0.97)),
             if (!iconOnly && showSub) ...[
               SizedBox(height: 2 * scale),
-              Text(sub, style: _neon(12 * scale, opacity: 0.95)),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.diamond_rounded, size: 12 * scale, color: const Color(0xFF8CF3FF)),
+                  SizedBox(width: 4 * scale),
+                  Text(sub, style: _neon(12 * scale, opacity: 0.95)),
+                ],
+              ),
             ] else if (!iconOnly && showLabel) ...[
               SizedBox(height: 2 * scale),
               Text(label, style: _neon(11 * scale, opacity: 0.9)),
