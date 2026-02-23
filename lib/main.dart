@@ -590,7 +590,7 @@ void _onCellDown(Pos p) {
   _pathColors.clear();
   _baseValue = v;
   _baseCount = 1;
-  _armed = true; // old-version behavior: no base-pair arming needed
+  _armed = false; // arm after first same-value connection
   _stageValue = null;
   _stageCount = 0;
   _lastValue = v;
@@ -612,7 +612,7 @@ void _recalcPathState() {
   }
   _baseValue = _valueAt(_path.first);
   _baseCount = _baseValue == null ? 0 : 1;
-  _armed = true; // old-version behavior: no base-pair arming needed
+  _armed = false; // arm after first same-value connection
   _stageValue = null;
   _stageCount = 0;
   _lastValue = _valueAt(_path.last);
@@ -640,16 +640,25 @@ void _onCellEnter(Pos p) {
   final v = _valueAt(p);
   if (v == null) return;
 
-  // Old-version rule:
-  // Next pick must be same or double of the previous pick (no base-pair arming).
   final lv = _lastValue ?? _valueAt(last);
   if (lv == null) return;
 
-  if (v == lv || v == (lv << 1)) {
+  // Rule:
+  // 1) First extension must connect to a tile with the SAME value as the starting tile.
+  // 2) After that, chain can continue on same value or step up one tier at a time (double).
+  bool allowed = false;
+  if (_path.length == 1) {
+    allowed = (_baseValue != null && v == _baseValue);
+  } else {
+    allowed = (v == lv || v == (lv << 1));
+  }
+
+  if (allowed) {
     _path.add(p);
     _pathColors.add(_chainColorForIndex(_path.length - 1));
     _playChainNote(_path.length);
     _lastValue = v;
+    _armed = _path.length >= 2 && _baseValue != null && _valueAt(_path[1]) == _baseValue;
     setState(() {});
   }
 }
@@ -1322,7 +1331,7 @@ void _handleDuplicateTap(Pos p) {
                             '$r',
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: 16,
+                              fontSize: 14,
                               fontWeight: FontWeight.w900,
                               shadows: [
                                 Shadow(
@@ -1789,8 +1798,8 @@ void _handleDuplicateTap(Pos p) {
                       final shake = (_shakeCtrl.value * 2 - 1);
                       final shimmer = _shimmerCtrl.value;
                       final comboN = _lastCombo.clamp(1, 20);
-                      final comboBoost = 1.18 + ((comboN - 5).clamp(0, 15)) * 0.07;
-                      final baseScale = (0.66 + Curves.elasticOut.transform(t) * 0.82) * comboBoost;
+                      final comboBoost = (1.00 + ((comboN - 5).clamp(0, 15)) * 0.035).clamp(1.0, 1.55);
+                      final baseScale = (0.58 + Curves.easeOutBack.transform(t) * 0.62) * comboBoost;
                       final fade = (1.0 - (t - 0.78).clamp(0.0, 0.22) / 0.22).clamp(0.0, 1.0);
                       final glow = 0.25 + (0.55 * t);
                       return Opacity(
@@ -1890,7 +1899,7 @@ void _handleDuplicateTap(Pos p) {
                                               textAlign: TextAlign.center,
                                               style: TextStyle(
                                                 color: Colors.white,
-                                                fontSize: comboN >= 11 ? 20 : 18,
+                                                fontSize: comboN >= 11 ? 18 : 16,
                                                 height: 1.05,
                                                 fontWeight: FontWeight.w900,
                                                 letterSpacing: 1.0,
