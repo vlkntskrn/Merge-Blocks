@@ -420,9 +420,9 @@ Random _rng = Random();
       _startAutoSave();
       if (!mounted) return;
       setState(() => _booting = false);
-      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _showDailyLoyaltyPopupIfNeeded(); });
+      WidgetsBinding.instance.addPostFrameCallback((_) { /* loyalty popup removed */ });
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _showDailyLoyaltyPopupIfNeeded();
+        if (mounted) { /* loyalty popup removed */ }
       });
     }();
   }
@@ -893,7 +893,7 @@ void _collapseAndFill() {
     _shimmerCtrl.repeat(period: const Duration(milliseconds: 900));
     // Small toast removed to avoid double-combo animation feeling.
 
-    _comboTimer = Timer(const Duration(milliseconds: 4200), () {
+    _comboTimer = Timer(const Duration(milliseconds: 5600), () {
       if (!mounted) return;
       _shimmerCtrl.stop();
       _comboCtrl.stop();
@@ -1140,7 +1140,7 @@ void _handleDuplicateTap(Pos p) {
 
 
 
-  void _showLaunchOfferIfNeeded() => _showDailyLoyaltyPopupIfNeeded();
+  void _showLaunchOfferIfNeeded() {}
 
   String _todayKey() {
     final d = DateTime.now();
