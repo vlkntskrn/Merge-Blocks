@@ -582,6 +582,10 @@ void _onCellDown(Pos p) {
     _handleHammerTap(p);
     return;
   }
+  if (duplicateMode) {
+    _handleDuplicateTap(p);
+    return;
+  }
 
   // Start a new drag/selection session (needed so _onCellUp can commit merge).
   _dragging = true;
@@ -2407,7 +2411,7 @@ Widget _buildBoard() {
               children: [
                 Text('Diamond Shop', style: _neon(18, opacity: 0.98)),
                 const SizedBox(height: 10),
-                ..._shopOffers.map((o) => Padding(
+                ...([..._shopOffers]..sort((a, b) => a.gems.compareTo(b.gems))).map((o) => Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
