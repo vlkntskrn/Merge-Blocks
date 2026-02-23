@@ -582,10 +582,6 @@ void _onCellDown(Pos p) {
     _handleHammerTap(p);
     return;
   }
-  if (duplicateMode) {
-    _handleDuplicateTap(p);
-    return;
-  }
 
   // Start a new drag/selection session (needed so _onCellUp can commit merge).
   _dragging = true;
@@ -863,35 +859,41 @@ void _collapseAndFill() {
   // Wrapper kept for compatibility with older call sites.
   BigInt _spawnValue() => _spawnTile();
 
-  String _comboTitleFor(int merges) {
-    if (merges >= 14) return 'LEGENDARY';
-    if (merges >= 11) return 'INSANE';
-    if (merges >= 9) return 'AWESOME';
-    if (merges >= 7) return 'GREAT';
-    return 'NICE';
-  }
-
   void _handleCombo(int merges) {
     _lastCombo = merges;
     _playMergeMelody(merges);
     if (merges < 5) return;
 
-    final title = _comboTitleFor(merges);
-    String toastMsg = '$title COMBO!';
+    String title;
+    if (merges >= 14) {
+      title = 'LEGENDARY';
+    } else if (merges >= 11) {
+      title = 'INSANE';
+    } else if (merges >= 8) {
+      title = 'AWESOME';
+    } else if (merges >= 6) {
+      title = 'GREAT';
+    } else {
+      title = 'NICE';
+    }
+
     if (merges >= 11) {
       diamonds += 1;
       _animateDiamondGain(1);
-      toastMsg = '$title COMBO! +1 💎';
     }
 
+    final chainLine = merges >= 11
+        ? (lang == AppLang.de ? '${merges}x KETTE  •  +1 💎' : '${merges}x CHAIN  •  +1 💎')
+        : (lang == AppLang.de ? '${merges}x KETTE' : '${merges}x CHAIN');
+
     _comboTimer?.cancel();
-    _comboMsg = title;
+    _comboMsg = '$title\nCOMBO!\n$chainLine';
     _comboCtrl.forward(from: 0);
     _shakeCtrl.forward(from: 0);
-    _shimmerCtrl.repeat(period: const Duration(milliseconds: 800));
-    _showToast(toastMsg);
+    _shimmerCtrl.repeat(period: const Duration(milliseconds: 900));
+    // Small toast removed to avoid double-combo animation feeling.
 
-    _comboTimer = Timer(const Duration(milliseconds: 1650), () {
+    _comboTimer = Timer(const Duration(milliseconds: 2100), () {
       if (!mounted) return;
       _comboCtrl.reverse();
       _shakeCtrl.reverse();
@@ -1006,16 +1008,16 @@ void _collapseAndFill() {
 
 void _toggleDuplicate() {
   if (!duplicateMode) {
-    if (diamonds < 12) {
+    if (diamonds < 20) {
       _showToast(t('notEnoughDiamonds'));
       return;
     }
-    diamonds -= 12;
+    diamonds -= 20;
     duplicateMode = true;
     swapMode = false;
     hammerMode = false;
     _swapFirst = null;
-    _showToast('-12 💎');
+    _showToast('-20 💎');
   } else {
     duplicateMode = false;
   }
@@ -1209,10 +1211,10 @@ void _handleDuplicateTap(Pos p) {
                 onTap: isActive ? claim : null,
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 220),
-                  width: 52,
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                  width: 88,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(14),
                     gradient: isActive
                         ? const LinearGradient(
                             begin: Alignment.topLeft,
@@ -1262,8 +1264,8 @@ void _handleDuplicateTap(Pos p) {
                             child: Align(
                               alignment: const Alignment(-0.65, -0.85),
                               child: Container(
-                                width: 30,
-                                height: 7,
+                                width: 42,
+                                height: 10,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(99),
                                   color: Colors.white.withOpacity(0.28),
@@ -1286,15 +1288,15 @@ void _handleDuplicateTap(Pos p) {
                             isDe ? 'TAG $day' : 'DAY $day',
                             style: TextStyle(
                               color: Colors.white.withOpacity(isActive ? 0.98 : 0.78),
-                              fontSize: 7.3,
+                              fontSize: 9.5,
                               fontWeight: FontWeight.w900,
                               letterSpacing: 0.7,
                             ),
                           ),
                           const SizedBox(height: 4),
                           Container(
-                            width: 22,
-                            height: 22,
+                            width: 34,
+                            height: 34,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               gradient: RadialGradient(
@@ -1312,7 +1314,7 @@ void _handleDuplicateTap(Pos p) {
                                   : isLocked
                                       ? Colors.white.withOpacity(0.55)
                                       : const Color(0xFFA8F9FF),
-                              size: 15,
+                              size: 20,
                             ),
                           ),
                           const SizedBox(height: 3),
@@ -1320,7 +1322,7 @@ void _handleDuplicateTap(Pos p) {
                             '$r',
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: 13,
+                              fontSize: 16,
                               fontWeight: FontWeight.w900,
                               shadows: [
                                 Shadow(
@@ -1341,16 +1343,16 @@ void _handleDuplicateTap(Pos p) {
 
           return Dialog(
             backgroundColor: Colors.transparent,
-            insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 28),
+            insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 20),
             child: TweenAnimationBuilder<double>(
               tween: Tween(begin: 0.92, end: 1.0),
               duration: const Duration(milliseconds: 260),
               curve: Curves.easeOutBack,
               builder: (context, s, child) => Transform.scale(scale: s, child: child),
               child: Container(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(22),
+                  borderRadius: BorderRadius.circular(26),
                   gradient: const LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -1399,10 +1401,10 @@ void _handleDuplicateTap(Pos p) {
                         Row(
                           children: [
                             Container(
-                              width: 58,
-                              height: 52,
+                              width: 72,
+                              height: 72,
                               decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(16),
+                                borderRadius: BorderRadius.circular(18),
                                 gradient: const LinearGradient(
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
@@ -1416,36 +1418,42 @@ void _handleDuplicateTap(Pos p) {
                               child: Stack(
                                 alignment: Alignment.center,
                                 children: [
+                                  Container(
+                                    width: 58,
+                                    height: 58,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      gradient: const RadialGradient(
+                                        colors: [Color(0xFF17224A), Color(0xFF0B1128)],
+                                      ),
+                                      border: Border.all(color: Colors.white.withOpacity(0.12)),
+                                      boxShadow: [
+                                        BoxShadow(color: const Color(0x552E5BFF), blurRadius: 18, spreadRadius: 2),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(Icons.diamond_rounded, color: Color(0xFFBDFBFF), size: 28),
                                   Positioned(
-                                    bottom: 9,
-                                    child: Icon(Icons.diamond_rounded, color: const Color(0xFFFFD36A), size: 22),
+                                    left: 10,
+                                    top: 12,
+                                    child: Icon(Icons.auto_awesome, color: const Color(0xFFFFD76A).withOpacity(0.9), size: 12),
                                   ),
                                   Positioned(
-                                    top: 10,
-                                    left: 9,
-                                    child: Icon(Icons.diamond_rounded, color: const Color(0xFF9EF7FF), size: 12),
-                                  ),
-                                  Positioned(
-                                    top: 8,
-                                    right: 8,
-                                    child: Icon(Icons.auto_awesome_rounded, color: const Color(0xFFB983FF), size: 11),
-                                  ),
-                                  Positioned(
-                                    right: 11,
-                                    bottom: 9,
-                                    child: Icon(Icons.diamond_rounded, color: const Color(0xFF5FF7FF), size: 9),
+                                    right: 12,
+                                    bottom: 14,
+                                    child: Icon(Icons.diamond_rounded, color: const Color(0xFFB983FF), size: 10),
                                   ),
                                 ],
                               ),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 10),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
                                     isDe ? 'TÄGLICHE TREUE' : 'DAILY LOYALTY',
-                                    style: _neon(13.5, opacity: 1).copyWith(
+                                    style: _neon(15, opacity: 1).copyWith(
                                       fontWeight: FontWeight.w900,
                                       letterSpacing: 1.1,
                                     ),
@@ -1455,13 +1463,13 @@ void _handleDuplicateTap(Pos p) {
                                     isDe ? 'Premium Bonus wartet auf dich' : 'Your premium reward is ready',
                                     style: TextStyle(
                                       color: Colors.white.withOpacity(0.78),
-                                      fontSize: 11.2,
+                                      fontSize: 12.5,
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                   const SizedBox(height: 6),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                     decoration: BoxDecoration(
                                       borderRadius: BorderRadius.circular(99),
                                       color: const Color(0xFFFF4FD8).withOpacity(0.15),
@@ -1473,7 +1481,7 @@ void _handleDuplicateTap(Pos p) {
                                           : 'TODAY: +$reward DIAMONDS',
                                       style: TextStyle(
                                         color: Colors.white,
-                                        fontSize: 9.2,
+                                        fontSize: 10,
                                         fontWeight: FontWeight.w900,
                                         letterSpacing: 0.7,
                                       ),
@@ -1491,20 +1499,20 @@ void _handleDuplicateTap(Pos p) {
                             isDe ? '7-Tage-Serie' : '7-Day Streak',
                             style: TextStyle(
                               color: Colors.white.withOpacity(0.78),
-                              fontSize: 11,
+                              fontSize: 12,
                               fontWeight: FontWeight.w800,
                             ),
                           ),
                         ),
                         const SizedBox(height: 8),
                         SizedBox(
-                          height: 76,
+                          height: 92,
                           child: ListView.separated(
                             scrollDirection: Axis.horizontal,
                             itemCount: 7,
-                            padding: const EdgeInsets.only(right: 2),
-                            separatorBuilder: (_, __) => const SizedBox(width: 6),
-                            itemBuilder: (context, i) => dayTile(i + 1),
+                            physics: const BouncingScrollPhysics(),
+                            separatorBuilder: (_, __) => const SizedBox(width: 8),
+                            itemBuilder: (_, i) => SizedBox(width: 78, child: dayTile(i + 1)),
                           ),
                         ),
                         const SizedBox(height: 10),
@@ -1522,7 +1530,7 @@ void _handleDuplicateTap(Pos p) {
                                 child: Text(isDe ? 'Später' : 'Later'),
                               ),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 10),
                             Expanded(
                               child: FilledButton(
                                 onPressed: claim,
@@ -1676,7 +1684,7 @@ void _handleDuplicateTap(Pos p) {
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                         decoration: BoxDecoration(
                           color: const Color(0xFF0E1A3B).withOpacity(0.86),
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(18),
                           border: Border.all(color: const Color(0xFF7DF9FF).withOpacity(0.28)),
                           boxShadow: [
                             BoxShadow(
@@ -1781,21 +1789,20 @@ void _handleDuplicateTap(Pos p) {
                       final shake = (_shakeCtrl.value * 2 - 1);
                       final shimmer = _shimmerCtrl.value;
                       final comboN = _lastCombo.clamp(1, 20);
-                      final comboBoost = 1.0 + ((comboN - 5).clamp(0, 15)) * 0.04;
-                      final baseScale = (0.72 + Curves.elasticOut.transform(t) * 0.50) * comboBoost;
+                      final comboBoost = 1.18 + ((comboN - 5).clamp(0, 15)) * 0.07;
+                      final baseScale = (0.66 + Curves.elasticOut.transform(t) * 0.82) * comboBoost;
                       final fade = (1.0 - (t - 0.78).clamp(0.0, 0.22) / 0.22).clamp(0.0, 1.0);
                       final glow = 0.25 + (0.55 * t);
-                      final comboColor = [const Color(0xFF63F4FF), const Color(0xFFFFB25C), const Color(0xFF7CFF8E), const Color(0xFFFF7DB4), const Color(0xFFC09BFF)][comboN % 5];
                       return Opacity(
                         opacity: fade,
                         child: Center(
                           child: Transform.translate(
-                            offset: Offset(sin(shake * pi * 2.0) * 5.0 * t, -8.0 - (14.0 * t)),
+                            offset: Offset(sin(shake * pi * 2.0) * 7.0 * t, -12.0 - (18.0 * t)),
                             child: Transform.scale(
                               scale: baseScale,
                               child: SizedBox(
-                                width: 164,
-                                height: 164,
+                                width: 220,
+                                height: 220,
                                 child: Stack(
                                   alignment: Alignment.center,
                                   children: [
@@ -1809,8 +1816,8 @@ void _handleDuplicateTap(Pos p) {
                                       ),
                                     ),
                                     Container(
-                                      width: 116,
-                                      height: 116,
+                                      width: 146,
+                                      height: 146,
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
                                         gradient: RadialGradient(
@@ -1829,8 +1836,8 @@ void _handleDuplicateTap(Pos p) {
                                     Transform.rotate(
                                       angle: (shimmer * 0.45) - 0.225,
                                       child: Container(
-                                        width: 132,
-                                        height: 22,
+                                        width: 164,
+                                        height: 38,
                                         decoration: BoxDecoration(
                                           borderRadius: BorderRadius.circular(99),
                                           gradient: LinearGradient(
@@ -1844,8 +1851,8 @@ void _handleDuplicateTap(Pos p) {
                                       ),
                                     ),
                                     Container(
-                                      width: 142,
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                      width: 176,
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                                       decoration: BoxDecoration(
                                         borderRadius: BorderRadius.circular(24),
                                         gradient: const LinearGradient(
@@ -1861,35 +1868,49 @@ void _handleDuplicateTap(Pos p) {
                                       child: Column(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Text(
-                                            _comboMsg!,
-                                            textAlign: TextAlign.center,
-                                            style: _neon(
-                                              comboN >= 11 ? 16 : 14,
-                                              opacity: 1.0,
-                                            ).copyWith(
-                                              color: comboColor,
-                                              fontWeight: FontWeight.w900,
-                                              letterSpacing: 0.8,
-                                              shadows: [
-                                                Shadow(color: Colors.black.withOpacity(0.48), offset: const Offset(0, 2.6), blurRadius: 1),
-                                                Shadow(color: comboColor.withOpacity(0.55), blurRadius: 14),
-                                                Shadow(color: Colors.white.withOpacity(0.35), offset: const Offset(-0.5, -0.5), blurRadius: 4),
-                                              ],
+                                          ShaderMask(
+                                            shaderCallback: (r) {
+                                              final List<Color> palette = comboN >= 14
+                                                  ? const [Color(0xFFFFF4AE), Color(0xFFFF9F1C), Color(0xFFFF5EA8)]
+                                                  : comboN >= 11
+                                                      ? const [Color(0xFFB9F7FF), Color(0xFF5DD9FF), Color(0xFF8D6BFF)]
+                                                      : comboN >= 8
+                                                          ? const [Color(0xFFFFD37A), Color(0xFFFF8A5B), Color(0xFFFF4FD8)]
+                                                          : comboN >= 6
+                                                              ? const [Color(0xFF9EF7FF), Color(0xFF59A8FF), Color(0xFF9B8CFF)]
+                                                              : const [Color(0xFFC7FFD9), Color(0xFF61F2A7), Color(0xFF3DD6FF)];
+                                              return LinearGradient(
+                                                begin: Alignment.topCenter,
+                                                end: Alignment.bottomCenter,
+                                                colors: palette,
+                                              ).createShader(r);
+                                            },
+                                            child: Text(
+                                              _comboMsg!,
+                                              textAlign: TextAlign.center,
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: comboN >= 11 ? 20 : 18,
+                                                height: 1.05,
+                                                fontWeight: FontWeight.w900,
+                                                letterSpacing: 1.0,
+                                                shadows: [
+                                                  Shadow(color: Colors.white.withOpacity(0.35), blurRadius: 8),
+                                                  Shadow(color: Colors.black.withOpacity(0.55), blurRadius: 18, offset: const Offset(0, 4)),
+                                                ],
+                                              ),
                                             ),
                                           ),
                                           const SizedBox(height: 4),
-                                          const SizedBox(height: 2),
                                           Text(
-                                            comboN >= 11 ? '+1 DIAMOND • ${comboN}x CHAIN' : '${comboN}x CHAIN',
+                                            '${comboN}x CHAIN',
                                             style: TextStyle(
-                                              color: comboColor.withOpacity(0.95),
-                                              fontSize: 9.5,
-                                              fontWeight: FontWeight.w900,
+                                              color: Colors.white.withOpacity(0.90),
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w800,
                                               letterSpacing: 1.0,
                                               shadows: [
-                                                Shadow(color: Colors.black.withOpacity(0.28), offset: const Offset(0, 1.2), blurRadius: 1),
-                                                Shadow(color: comboColor.withOpacity(0.45), blurRadius: 8),
+                                                Shadow(color: const Color(0xFF7DF9FF).withOpacity(0.55), blurRadius: 10),
                                               ],
                                             ),
                                           ),
@@ -1934,7 +1955,7 @@ void _handleDuplicateTap(Pos p) {
         margin: const EdgeInsets.fromLTRB(14, 0, 14, 6),
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(color: Colors.white.withOpacity(0.10)),
         ),
         child: Center(
@@ -1942,7 +1963,7 @@ void _handleDuplicateTap(Pos p) {
             'BANNER AD',
             style: TextStyle(
               color: Colors.white.withOpacity(0.65),
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: FontWeight.w900,
               letterSpacing: 1.1,
             ),
@@ -1990,7 +2011,7 @@ void _handleDuplicateTap(Pos p) {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               _tinyButton(icon: Icons.settings, onTap: _openSettingsSheet),
             ],
           ),
@@ -1998,9 +2019,9 @@ void _handleDuplicateTap(Pos p) {
           Row(
             children: [
               Expanded(child: _miniStatChip(t('now'), nowLabel)),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               Expanded(child: _miniStatChip(t('max'), maxLabel)),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               Expanded(child: _miniStatChip(t('next'), goalLabel)),
             ],
           ),
@@ -2047,7 +2068,7 @@ void _handleDuplicateTap(Pos p) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 30,
+        width: 42,
         height: 36,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(13),
@@ -2075,7 +2096,7 @@ void _handleDuplicateTap(Pos p) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -2096,7 +2117,7 @@ void _handleDuplicateTap(Pos p) {
             label.toUpperCase(),
             style: TextStyle(
               color: Colors.white.withOpacity(0.78),
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: FontWeight.w900,
               letterSpacing: 0.8,
             ),
@@ -2331,43 +2352,23 @@ Widget _buildBoard() {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 62 * scale,
+        height: 58 * scale,
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Colors.white.withOpacity(active ? 0.18 : 0.10),
-              Colors.white.withOpacity(active ? 0.10 : 0.05),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(17 * scale),
-          border: Border.all(color: active ? accentColor.withOpacity(0.72) : Colors.white.withOpacity(0.12)),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.28), blurRadius: 10, offset: const Offset(0, 5)),
-            if (active) BoxShadow(color: accentColor.withOpacity(0.22), blurRadius: 16, spreadRadius: 1),
-          ],
+          color: Colors.white.withOpacity(active ? 0.15 : 0.08),
+          borderRadius: BorderRadius.circular(16 * scale),
+          border: Border.all(color: active ? accentColor.withOpacity(0.70) : Colors.white.withOpacity(0.10)),
+          boxShadow: [if (active) BoxShadow(color: accentColor.withOpacity(0.22), blurRadius: 16)],
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              width: (iconOnly ? 34 : 30) * scale,
-              height: (iconOnly ? 34 : 30) * scale,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.06),
-                border: Border.all(color: (active ? accentColor : Colors.white).withOpacity(0.20)),
-                boxShadow: [if (active) BoxShadow(color: accentColor.withOpacity(0.20), blurRadius: 10)],
-              ),
-              child: Icon(icon, size: (iconOnly ? 20 : 18) * scale, color: (active ? accentColor : Colors.white).withOpacity(0.97)),
-            ),
+            Icon(icon, size: (iconOnly ? 32 : 26) * scale, color: (active ? accentColor : Colors.white).withOpacity(0.97)),
             if (!iconOnly && showSub) ...[
-              SizedBox(height: 3 * scale),
-              Text(sub, style: TextStyle(color: Colors.white, fontSize: 12 * scale, fontWeight: FontWeight.w900)),
+              SizedBox(height: 2 * scale),
+              Text(sub, style: _neon(12 * scale, opacity: 0.95)),
             ] else if (!iconOnly && showLabel) ...[
-              SizedBox(height: 3 * scale),
-              Text(label, style: TextStyle(color: Colors.white.withOpacity(0.92), fontSize: 10.5 * scale, fontWeight: FontWeight.w800)),
+              SizedBox(height: 2 * scale),
+              Text(label, style: _neon(11 * scale, opacity: 0.9)),
             ],
           ],
         ),
@@ -2396,7 +2397,7 @@ Widget _buildBoard() {
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: Colors.white.withOpacity(0.10)),
                     ),
                     child: Row(children: [
@@ -2472,13 +2473,13 @@ Widget _buildBoard() {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.white.withOpacity(0.12)),
       ),
       child: Row(
         children: [
           Expanded(child: Text(title, style: _neon(13, opacity: 0.9))),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           child,
         ],
       ),
