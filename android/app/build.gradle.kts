@@ -6,7 +6,9 @@ plugins {
 }
 
 android {
-    namespace = "com.example.merge_blocks"
+    // Teknik package name (kalıcı kimlik)
+    namespace = "com.vlkntskrn.mergeblocksneonchain"
+
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
 
@@ -20,10 +22,10 @@ android {
     }
 
     defaultConfig {
-        // Kendi package id'n neyse onu yaz
-        applicationId = "com.example.merge_blocks"
+        // Google Play'de uygulamanın teknik kimliği (AAB'den okunur)
+        applicationId = "com.vlkntskrn.mergeblocksneonchain"
 
-        // shared_preferences_android için güvenli alt sınır
+        // shared_preferences / ads / billing için güvenli alt sınır
         minSdk = 21
 
         targetSdk = flutter.targetSdkVersion
@@ -33,8 +35,13 @@ android {
 
     buildTypes {
         release {
-            // Şimdilik debug signing (CI/build için yeterli)
+            // Şimdilik debug signing (test/internal build için)
+            // Production'a geçerken gerçek release keystore bağlayacağız
             signingConfig = signingConfigs.getByName("debug")
+
+            // İstersen şimdilik kapalı bırak
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
