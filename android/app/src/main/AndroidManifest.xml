@@ -1,19 +1,22 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- İnternet izni (özellikle reklamlar / ağ erişimi için gerekli) -->
+
+    <!-- Ağ erişimi (AdMob + Billing + genel internet işlemleri) -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Network durumunu okumak bazı SDK'larda faydalı/istenebilir -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Kamerayı gerçekten kullanmıyorsan kaldırabilirsin -->
-    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Google Play Billing (in-app purchase / elmas satışları) -->
+    <uses-permission android:name="com.android.vending.BILLING" />
+
+    <!-- Kamerayı kullanmıyorsan kapalı tut -->
+    <!-- <uses-permission android:name="android.permission.CAMERA" /> -->
 
     <application
-        android:label="merge_blocks"
+        android:label="Merge Blocks Neon Chain"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
-        <!-- Google Mobile Ads App ID (TEST ID) -->
-        <!-- Canlıya geçerken bunu kendi AdMob App ID'n ile değiştir -->
+        <!-- AdMob App ID (TEST) -->
+        <!-- Canlıya geçerken kendi AdMob App ID'n ile değiştir -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-3940256099942544~3347511713" />
@@ -29,7 +32,7 @@
             android:windowSoftInputMode="adjustResize"
             android:screenOrientation="portrait">
 
-            <!-- Flutter UI yüklenene kadar görünen tema -->
+            <!-- Flutter UI açılana kadar görünen tema -->
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
                 android:resource="@style/NormalTheme" />
@@ -53,4 +56,5 @@
             <data android:mimeType="text/plain" />
         </intent>
     </queries>
+
 </manifest>
