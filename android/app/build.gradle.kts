@@ -35,11 +35,10 @@ android {
 
     buildTypes {
         release {
-            // Şimdilik debug signing (test/internal build için)
+            // Şimdilik debug signing (internal test / CI build için)
             // Production'a geçerken gerçek release keystore bağlayacağız
             signingConfig = signingConfigs.getByName("debug")
 
-            // İstersen şimdilik kapalı bırak
             isMinifyEnabled = false
             isShrinkResources = false
         }
