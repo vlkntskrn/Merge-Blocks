@@ -13,7 +13,11 @@ dependencies:
 
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.2.3
+
+  # AdMob (banner / rewarded / interstitial)
   google_mobile_ads: ^5.1.0
+
+  # Google Play Billing (elmas satışları için)
   in_app_purchase: ^3.2.0
 
 dev_dependencies:
