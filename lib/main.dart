@@ -2942,7 +2942,7 @@ class _ToolButtonState extends State<_ToolButton> {
           duration: const Duration(milliseconds: 200),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 220),
-            height: 82 * s,
+            height: 92 * s,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(20 * s),
               gradient: LinearGradient(
@@ -3062,7 +3062,7 @@ class _AdRewardButtonState extends State<_AdRewardButton> with SingleTickerProvi
           builder: (context, child) {
             final g = Curves.easeInOut.transform(_pulse.value);
             return Container(
-              height: 82 * s,
+              height: 92 * s,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(20 * s),
                 gradient: const LinearGradient(
