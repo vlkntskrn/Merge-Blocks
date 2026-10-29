@@ -6,6 +6,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'ads.dart';
+
 const String _prefsKeyV1 = 'merge_blocks_save_v1';
 
 class _GemFlyFx {
@@ -76,6 +78,8 @@ void main() async {
     await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   } catch (_) {}
   runApp(const MergeBlocksApp());
+  // GDPR onayı + AdMob arka planda başlar; hata olursa oyun reklamsız sürer.
+  unawaited(Ads.instance.init());
 }
 
 class MergeBlocksApp extends StatelessWidget {
@@ -160,6 +164,7 @@ void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
 }
 
 void _saveToBlob() {
+  if (!_gridReady) return;
   final flat = <String?>[];
   for (int r = 0; r < rows; r++) {
     for (int c = 0; c < cols; c++) {
@@ -211,6 +216,7 @@ void _loadFromBlob(String raw) {
     }
 
     grid = nextGrid;
+    _gridReady = true;
 
     final scoreRaw = data['score'];
     if (scoreRaw != null) {
@@ -283,15 +289,9 @@ Random _rng = Random();
   int _dailyStreak = 0;
   String? _dailyLastClaimDate;
   final List<int> _dailyRewards = const [7, 10, 15, 25, 35, 45, 60];
-  final List<({int gems, int baseUsd, int discountedUsd, String tag, String title})> _shopOffers = const [
-    (gems: 250, baseUsd: 15, discountedUsd: 9, tag: 'ROYAL DROP', title: 'Sana Özel Teklif'),
-    (gems: 500, baseUsd: 29, discountedUsd: 17, tag: 'LUXE BAG', title: 'VIP Elmas Paketi'),
-    (gems: 1000, baseUsd: 59, discountedUsd: 35, tag: 'MEGA VAULT', title: 'Ultra Premium Teklif'),
-    (gems: 150, baseUsd: 10, discountedUsd: 6, tag: 'FLASH DEAL', title: 'Bugüne Özel'),
-    (gems: 750, baseUsd: 39, discountedUsd: 23, tag: 'GOLDEN SALE', title: 'Sana Özel İndirim'),
-  ];
 
   late List<List<BigInt?>> grid;
+  bool _gridReady = false;
 
   int levelIdx = 1; // Level 1 starts
   BigInt score = BigInt.zero;
@@ -359,6 +359,10 @@ Random _rng = Random();
     'broken': 'Broken!',
     'shopTitle': 'Diamond Shop',
     'buy': 'Buy',
+    'adNotReady': 'Ad not ready, try again soon',
+    'reshuffled': 'No moves – board shuffled',
+    'pauseText': 'Resume, or start a new board. Your diamonds are kept.',
+    'privacy': 'Privacy options',
   };
 
   static const Map<String, String> _de = {
@@ -382,6 +386,10 @@ Random _rng = Random();
     'broken': 'Zerbrochen!',
     'shopTitle': 'Diamant-Shop',
     'buy': 'Kaufen',
+    'adNotReady': 'Werbung nicht bereit, bitte gleich nochmal',
+    'reshuffled': 'Keine Züge – Feld gemischt',
+    'pauseText': 'Weiterspielen oder neues Feld starten. Deine Diamanten bleiben.',
+    'privacy': 'Datenschutz-Optionen',
   };
 
   String t(String key) {
@@ -417,6 +425,8 @@ Random _rng = Random();
           _saveToBlob();
         }
       }
+      if (!_gridReady) _resetBoard(hard: true);
+      _ensureMovesAvailable();
       _startAutoSave();
       if (!mounted) return;
       setState(() => _booting = false);
@@ -454,16 +464,19 @@ Random _rng = Random();
     super.dispose();
   }
 
-void _resetBoard({required bool hard}) {
-    grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
-    _initFirstBoard();
-    _clearPath();
+void _resetBoard({required bool hard, bool keepDiamonds = false}) {
+    _cancelToolModes();
     if (hard) {
       score = BigInt.zero;
       levelIdx = 1;
-      diamonds = 0;
+      if (!keepDiamonds) diamonds = 0;
       swaps = 0;
     }
+    grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
+    _gridReady = true;
+    _initFirstBoard();
+    _clearPath();
+    _ensureMovesAvailable();
     _recalcBest();
     _saveToBlob();
     setState(() {});
@@ -777,6 +790,7 @@ void _applyMergeChain(List<Pos> chain) {
 
   // Let existing gravity + spawn animation system handle refills.
   _collapseAndFill();
+  _ensureMovesAvailable();
 
   // Treat "combo" as number of tiles consumed.
   _handleCombo(max(0, pos.length - 1));
@@ -868,6 +882,43 @@ void _collapseAndFill() {
   _spawnTick++;
 }
 
+
+  /// En az bir hamle var mı: 8 yönde aynı değerli iki komşu taş.
+  bool _hasAnyMove() {
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        final v = grid[r][c];
+        if (v == null) continue;
+        for (int dr = -1; dr <= 1; dr++) {
+          for (int dc = -1; dc <= 1; dc++) {
+            if (dr == 0 && dc == 0) continue;
+            final p = Pos(r + dr, c + dc);
+            if (_inBounds(p) && grid[p.r][p.c] == v) return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  /// Hamle kalmadıysa taşları karıştırır; yine olmazsa bir taşı komşusuyla eşitler.
+  void _ensureMovesAvailable() {
+    if (_hasAnyMove()) return;
+    final vals = <BigInt>[for (final row in grid) for (final v in row) if (v != null) v];
+    for (int attempt = 0; attempt < 30; attempt++) {
+      vals.shuffle(_rng);
+      int i = 0;
+      for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+          grid[r][c] = i < vals.length ? vals[i++] : _spawnTile();
+        }
+      }
+      if (_hasAnyMove()) break;
+    }
+    if (!_hasAnyMove()) grid[0][1] = grid[0][0];
+    _spawnTick++;
+    _showToast(t('reshuffled'));
+  }
 
   // Wrapper kept for compatibility with older call sites.
   BigInt _spawnValue() => _spawnTile();
@@ -969,6 +1020,8 @@ void _collapseAndFill() {
     swapMode = false;
     _swapFirst = null;
     _showToast(t('swap'));
+    _ensureMovesAvailable();
+    _saveToBlob();
     setState(() {});
   }
 
@@ -978,65 +1031,71 @@ void _collapseAndFill() {
     _collapseAndFill();
     hammerMode = false;
     _showToast(t('broken'));
-    setState(() {});
-  }
-
-  void _toggleSwap() {
-  if (!swapMode) {
-    if (diamonds < 10) {
-      _showToast(t('notEnoughDiamonds'));
-      return;
-    }
-    diamonds -= 10;
-    swapMode = true;
-    hammerMode = false;
-    duplicateMode = false;
-    _swapFirst = null;
-    _showToast('-10 💎');
-  } else {
-    swapMode = false;
-    _swapFirst = null;
-  }
-  _saveToBlob();
-  setState(() {});
-}
-
-  void _toggleHammer() {
-    if (!hammerMode) {
-      if (diamonds < 7) {
-        _showToast(t('notEnoughDiamonds'));
-        return;
-      }
-      diamonds -= 7;
-      hammerMode = true;
-      swapMode = false;
-      _swapFirst = null;
-      _showToast('-7 💎');
-    } else {
-      hammerMode = false;
-    }
+    _ensureMovesAvailable();
     _saveToBlob();
     setState(() {});
   }
 
-void _toggleDuplicate() {
-  if (!duplicateMode) {
-    if (diamonds < 20) {
-      _showToast(t('notEnoughDiamonds'));
-      return;
+  static const int _costSwap = 10;
+  static const int _costHammer = 7;
+  static const int _costDuplicate = 20;
+
+  /// Aktif araç modunu kapatır; araç kullanılmadan kapatıldıysa elmasları iade eder.
+  void _cancelToolModes({bool refund = true}) {
+    if (refund) {
+      if (swapMode) diamonds += _costSwap;
+      if (hammerMode) diamonds += _costHammer;
+      if (duplicateMode) diamonds += _costDuplicate;
     }
-    diamonds -= 20;
-    duplicateMode = true;
     swapMode = false;
     hammerMode = false;
-    _swapFirst = null;
-    _showToast('-20 💎');
-  } else {
     duplicateMode = false;
+    _swapFirst = null;
   }
-  _saveToBlob();
-  setState(() {});
-}
+
+  void _activateTool(int cost, void Function() setMode) {
+    _cancelToolModes();
+    if (diamonds < cost) {
+      _showToast(t('notEnoughDiamonds'));
+      setState(() {});
+      return;
+    }
+    diamonds -= cost;
+    setMode();
+    _showToast('-$cost 💎');
+    _saveToBlob();
+    setState(() {});
+  }
+
+  void _toggleSwap() {
+    if (swapMode) {
+      _cancelToolModes();
+      _saveToBlob();
+      setState(() {});
+      return;
+    }
+    _activateTool(_costSwap, () => swapMode = true);
+  }
+
+  void _toggleHammer() {
+    if (hammerMode) {
+      _cancelToolModes();
+      _saveToBlob();
+      setState(() {});
+      return;
+    }
+    _activateTool(_costHammer, () => hammerMode = true);
+  }
+
+  void _toggleDuplicate() {
+    if (duplicateMode) {
+      _cancelToolModes();
+      _saveToBlob();
+      setState(() {});
+      return;
+    }
+    _activateTool(_costDuplicate, () => duplicateMode = true);
+  }
 
 void _handleDuplicateTap(Pos p) {
   final v = _valueAt(p);
@@ -1044,6 +1103,8 @@ void _handleDuplicateTap(Pos p) {
   grid[p.r][p.c] = v << 1;
   duplicateMode = false;
   _showToast('x2');
+  _recalcBest();
+  _checkGoalAndMaybeAdvance();
   _saveToBlob();
   setState(() {});
 }
@@ -1051,11 +1112,15 @@ void _handleDuplicateTap(Pos p) {
   void _watchAdForDiamonds() => _watchAdReward();
 
   void _watchAdReward() {
-  diamonds += 10;
-  _animateDiamondGain(10);
-  _showToast('+10 💎');
-  _saveToBlob();
-  setState(() {});
+  final shown = Ads.instance.showRewarded(() {
+    if (!mounted) return;
+    diamonds += 10;
+    _animateDiamondGain(10);
+    _showToast('+10 💎');
+    _saveToBlob();
+    setState(() {});
+  });
+  if (!shown) _showToast(t('adNotReady'));
 }
 
 
@@ -1960,30 +2025,8 @@ void _handleDuplicateTap(Pos p) {
   }
 
   Widget _buildBannerAdPlaceholder() {
-    // Phase 1: fixed-size banner slot to prevent board overlap.
-    // Replace this Container with real AdMob Banner widget when integrating ads.
-    return SizedBox(
-      height: kBannerHeight,
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(14, 0, 14, 6),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withOpacity(0.10)),
-        ),
-        child: Center(
-          child: Text(
-            'BANNER AD',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.65),
-              fontSize: 12,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1.1,
-            ),
-          ),
-        ),
-      ),
-    );
+    // Sabit yükseklik: reklam yüklenmese de tahta kaymaz.
+    return const BannerSlot(height: kBannerHeight);
   }
 
   Widget _buildHeader({
@@ -2007,7 +2050,7 @@ void _handleDuplicateTap(Pos p) {
                     const SizedBox(width: 6),
                     Text('$diamonds', style: _neon(16)),
                     const SizedBox(width: 8),
-                    _tinyButton(icon: Icons.add, onTap: _openShopSheet),
+                    _tinyButton(icon: Icons.add, onTap: _watchAdForDiamonds),
                   ],
                 ),
               ),
@@ -2336,15 +2379,13 @@ Widget _buildBoard() {
         boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 24, offset: Offset(0, -8))],
       ),
       child: Row(children: [
-        Expanded(child: _actionButton(icon: swapMode ? Icons.close : Icons.swap_horiz_rounded, label: t('swap'), sub: '10', active: swapMode, onTap: _toggleSwap, accent: const Color(0xFF74F9FF), showLabel: false)),
+        Expanded(child: _actionButton(icon: swapMode ? Icons.close : Icons.swap_horiz_rounded, label: t('swap'), sub: '$_costSwap', active: swapMode, onTap: _toggleSwap, accent: const Color(0xFF74F9FF), showLabel: false)),
         const SizedBox(width: 6),
-        Expanded(child: _actionButton(icon: hammerMode ? Icons.close : Icons.gavel_rounded, label: t('hammer'), sub: '7', active: hammerMode, onTap: _toggleHammer, accent: const Color(0xFFFFB870), showLabel: false)),
+        Expanded(child: _actionButton(icon: hammerMode ? Icons.close : Icons.gavel_rounded, label: t('hammer'), sub: '$_costHammer', active: hammerMode, onTap: _toggleHammer, accent: const Color(0xFFFFB870), showLabel: false)),
         const SizedBox(width: 6),
-        Expanded(child: _actionButton(icon: duplicateMode ? Icons.close : Icons.copy_rounded, label: t('duplicate'), sub: '12', active: duplicateMode, onTap: _toggleDuplicate, accent: const Color(0xFF9B8CFF), showLabel: false)),
+        Expanded(child: _actionButton(icon: duplicateMode ? Icons.close : Icons.copy_rounded, label: t('duplicate'), sub: '$_costDuplicate', active: duplicateMode, onTap: _toggleDuplicate, accent: const Color(0xFF9B8CFF), showLabel: false)),
         const SizedBox(width: 6),
         Expanded(child: _actionButton(icon: Icons.play_circle_fill_rounded, label: t('watchAd'), sub: '+10', onTap: _watchAdForDiamonds, accent: const Color(0xFF61F2A7), showLabel: false)),
-        const SizedBox(width: 6),
-        Expanded(child: _actionButton(icon: Icons.shopping_bag_rounded, label: t('shop'), sub: '', onTap: _openShopSheet, accent: const Color(0xFFFFD76A), iconOnly: true, showSub: false)),
       ]),
     );
   }
@@ -2397,55 +2438,6 @@ Widget _buildBoard() {
   }
 
 
-  void _openShopSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF06102C),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
-      builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Diamond Shop', style: _neon(18, opacity: 0.98)),
-                const SizedBox(height: 10),
-                ...([..._shopOffers]..sort((a, b) => a.gems.compareTo(b.gems))).map((o) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.white.withOpacity(0.10)),
-                    ),
-                    child: Row(children: [
-                      const Icon(Icons.diamond, color: Color(0xFF8CF3FF)),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text('${o.gems} • \$${o.discountedUsd}', style: _neon(13, opacity: 0.95))),
-                      FilledButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          diamonds += o.gems;
-                          _animateDiamondGain(o.gems);
-                          _saveToBlob();
-                          _showToast('+${o.gems} 💎');
-                          setState(() {});
-                        },
-                        child: const Text('Buy'),
-                      ),
-                    ]),
-                  ),
-                )),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   void _openSettingsSheet() {
     showModalBottomSheet(
       context: context,
@@ -2467,7 +2459,21 @@ Widget _buildBoard() {
                     ButtonSegment(value: AppLang.de, label: Text('DE')),
                   ],
                   selected: {lang},
-                  onSelectionChanged: (s) => setState(() => lang = s.first),
+                  onSelectionChanged: (s) {
+                    setState(() => lang = s.first);
+                    _saveToBlob();
+                  },
+                ),
+              ),
+              const SizedBox(height: 10),
+              _settingsRow(
+                title: t('privacy'),
+                child: OutlinedButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    Ads.instance.showPrivacyOptions();
+                  },
+                  child: const Icon(Icons.privacy_tip_outlined, size: 18),
                 ),
               ),
               const SizedBox(height: 10),
@@ -2513,7 +2519,7 @@ Widget _buildBoard() {
         backgroundColor: const Color(0xFF0B163A),
         title: Text(t('pause'), style: _neon(18)),
         content: Text(
-          'Swap / Tokmak modunu kapatıp oyuna dönebilir veya yeniden başlatabilirsin.',
+          t('pauseText'),
           style: TextStyle(color: Colors.white.withOpacity(0.75)),
         ),
         actions: [
@@ -2521,7 +2527,7 @@ Widget _buildBoard() {
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
-              _resetBoard(hard: true);
+              _resetBoard(hard: true, keepDiamonds: true);
             },
             child: Text(t('restart')),
           ),
