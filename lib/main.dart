@@ -432,9 +432,11 @@ Random _rng = Random();
       _startAutoSave();
       if (!mounted) return;
       setState(() => _booting = false);
-      WidgetsBinding.instance.addPostFrameCallback((_) { /* loyalty popup removed */ });
+      // Günlük giriş ödülü (7 günlük seri). Gün içinde alınmışsa gösterilmez.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) { /* loyalty popup removed */ }
+        Future.delayed(const Duration(milliseconds: 600), () {
+          if (mounted) _showDailyLoyaltyPopupIfNeeded();
+        });
       });
     }();
   }
@@ -684,53 +686,6 @@ void _onCellEnter(Pos p) {
 
 
 
-void _recomputeSelectionState() {
-  _armed = false;
-  _baseValue = null;
-  _baseCount = 0;
-  _stageValue = null;
-  _stageCount = 0;
-
-  if (_path.isEmpty) return;
-
-  final firstV = _valueAt(_path.first);
-  if (firstV == null) return;
-
-  _baseValue = firstV;
-
-  // count initial same-value run
-  int i = 0;
-  while (i < _path.length && _valueAt(_path[i]) == firstV) {
-    i++;
-  }
-  _baseCount = i;
-
-  if (_baseCount >= 2) {
-    _armed = true;
-    _stageValue = firstV;
-    _stageCount = _baseCount;
-
-    // walk remaining selections enforcing: same stage, or (stage even) -> next stage
-    for (int j = i; j < _path.length; j++) {
-      final v = _valueAt(_path[j]);
-      if (v == null) break;
-      final sv = _stageValue!;
-      if (v == sv) {
-        _stageCount++;
-        continue;
-      }
-      if (_stageCount >= 2 && _stageCount.isEven && v == (sv << 1)) {
-        _stageValue = sv << 1;
-        _stageCount = 1;
-        continue;
-      }
-      break;
-    }
-  }
-  _lastValue = null;
-}
-
-
 void _onCellUp() {
   if (!_dragging) return;
   _dragging = false;
@@ -804,41 +759,6 @@ void _applyMergeChain(List<Pos> chain) {
 }
 
 
-
-void _cascadeFrom(Pos start) {
-  // Chain merge (no collapse during cascade):
-  // While the tile has an equal neighbour (8-direction), merge pairwise into this tile.
-  Pos cur = start;
-  while (true) {
-    final v = grid[cur.r][cur.c];
-    if (v == null) return;
-
-    Pos? neighborSame;
-    for (int dr = -1; dr <= 1; dr++) {
-      for (int dc = -1; dc <= 1; dc++) {
-        if (dr == 0 && dc == 0) continue;
-        final p = Pos(cur.r + dr, cur.c + dc);
-        if (!_inBounds(p)) continue;
-        if (grid[p.r][p.c] == v) {
-          neighborSame = p;
-          break;
-        }
-      }
-      if (neighborSame != null) break;
-    }
-    if (neighborSame == null) return;
-
-    // Consume neighbour into current.
-    grid[neighborSame.r][neighborSame.c] = null;
-    final newV = v * BigInt.from(2);
-    grid[cur.r][cur.c] = newV;
-
-    // Score adds the produced value.
-    score += newV;
-    _animateCoinGain(3);
-    _recalcBest();
-  }
-}
 
 void _collapseAndFill() {
   // Gravity collapse downwards per column, then fill empties with spawn values.
@@ -925,6 +845,15 @@ void _collapseAndFill() {
   // Wrapper kept for compatibility with older call sites.
   BigInt _spawnValue() => _spawnTile();
 
+  /// Kombo elmas ödülü: 5→+1, 8→+2, 11→+3, 14 ve üstü→+5.
+  static int _comboReward(int merges) {
+    if (merges >= 14) return 5;
+    if (merges >= 11) return 3;
+    if (merges >= 8) return 2;
+    if (merges >= 5) return 1;
+    return 0;
+  }
+
   void _handleCombo(int merges) {
     _lastCombo = merges;
     _playMergeMelody(merges);
@@ -943,14 +872,14 @@ void _collapseAndFill() {
       title = 'NICE';
     }
 
-    if (merges >= 11) {
-      diamonds += 1;
-      _animateDiamondGain(1);
+    final reward = _comboReward(merges);
+    if (reward > 0) {
+      diamonds += reward;
+      _animateDiamondGain(reward);
     }
 
-    final chainLine = merges >= 11
-        ? (lang == AppLang.de ? '${merges}x KETTE  •  +1 💎' : '${merges}x CHAIN  •  +1 💎')
-        : (lang == AppLang.de ? '${merges}x KETTE' : '${merges}x CHAIN');
+    final chainWord = lang == AppLang.de ? 'KETTE' : 'CHAIN';
+    final chainLine = '${merges}x $chainWord  •  +$reward 💎';
 
     _comboTimer?.cancel();
     _comboMsg = '$title\nCOMBO!\n$chainLine';
@@ -959,7 +888,7 @@ void _collapseAndFill() {
     _shimmerCtrl.repeat(period: const Duration(milliseconds: 900));
     // Small toast removed to avoid double-combo animation feeling.
 
-    _comboTimer = Timer(const Duration(milliseconds: 5600), () {
+    _comboTimer = Timer(const Duration(milliseconds: 1800), () {
       if (!mounted) return;
       _shimmerCtrl.stop();
       _comboCtrl.stop();
@@ -1220,7 +1149,6 @@ void _handleDuplicateTap(Pos p) {
 
 
 
-  void _showLaunchOfferIfNeeded() {}
 
   String _todayKey() {
     final d = DateTime.now();
@@ -1557,7 +1485,7 @@ void _handleDuplicateTap(Pos p) {
                                     ),
                                     child: Text(
                                       isDe
-                                          ? 'HEUTE: +$reward ELMAS'
+                                          ? 'HEUTE: +$reward DIAMANTEN'
                                           : 'TODAY: +$reward DIAMONDS',
                                       style: TextStyle(
                                         color: Colors.white,
@@ -2442,54 +2370,6 @@ Widget _buildBoard() {
       ]),
     );
   }
-
-  Widget _actionButton({
-    required IconData icon,
-    required String label,
-    required String sub,
-    required VoidCallback onTap,
-    bool active = false,
-    bool iconOnly = false,
-    bool showLabel = true,
-    bool showSub = true,
-    Color? accent,
-  }) {
-    final scale = uiScale;
-    final accentColor = accent ?? const Color(0xFF7DF9FF);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 58 * scale,
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(active ? 0.15 : 0.08),
-          borderRadius: BorderRadius.circular(16 * scale),
-          border: Border.all(color: active ? accentColor.withOpacity(0.70) : Colors.white.withOpacity(0.10)),
-          boxShadow: [if (active) BoxShadow(color: accentColor.withOpacity(0.22), blurRadius: 16)],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: (iconOnly ? 32 : 26) * scale, color: (active ? accentColor : Colors.white).withOpacity(0.97)),
-            if (!iconOnly && showSub) ...[
-              SizedBox(height: 2 * scale),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.diamond_rounded, size: 12 * scale, color: const Color(0xFF8CF3FF)),
-                  SizedBox(width: 4 * scale),
-                  Text(sub, style: _neon(12 * scale, opacity: 0.95)),
-                ],
-              ),
-            ] else if (!iconOnly && showLabel) ...[
-              SizedBox(height: 2 * scale),
-              Text(label, style: _neon(11 * scale, opacity: 0.9)),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
 
   void _openSettingsSheet() {
     showModalBottomSheet(
