@@ -6,6 +6,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'ads.dart';
+import 'billing.dart';
+
 const String _prefsKeyV1 = 'merge_blocks_save_v1';
 
 class _GemFlyFx {
@@ -76,6 +79,8 @@ void main() async {
     await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   } catch (_) {}
   runApp(const MergeBlocksApp());
+  // GDPR onayı + AdMob arka planda başlar; hata olursa oyun reklamsız sürer.
+  unawaited(Ads.instance.init());
 }
 
 class MergeBlocksApp extends StatelessWidget {
@@ -160,6 +165,7 @@ void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
 }
 
 void _saveToBlob() {
+  if (!_gridReady) return;
   final flat = <String?>[];
   for (int r = 0; r < rows; r++) {
     for (int c = 0; c < cols; c++) {
@@ -211,6 +217,7 @@ void _loadFromBlob(String raw) {
     }
 
     grid = nextGrid;
+    _gridReady = true;
 
     final scoreRaw = data['score'];
     if (scoreRaw != null) {
@@ -283,15 +290,9 @@ Random _rng = Random();
   int _dailyStreak = 0;
   String? _dailyLastClaimDate;
   final List<int> _dailyRewards = const [7, 10, 15, 25, 35, 45, 60];
-  final List<({int gems, int baseUsd, int discountedUsd, String tag, String title})> _shopOffers = const [
-    (gems: 250, baseUsd: 15, discountedUsd: 9, tag: 'ROYAL DROP', title: 'Sana Özel Teklif'),
-    (gems: 500, baseUsd: 29, discountedUsd: 17, tag: 'LUXE BAG', title: 'VIP Elmas Paketi'),
-    (gems: 1000, baseUsd: 59, discountedUsd: 35, tag: 'MEGA VAULT', title: 'Ultra Premium Teklif'),
-    (gems: 150, baseUsd: 10, discountedUsd: 6, tag: 'FLASH DEAL', title: 'Bugüne Özel'),
-    (gems: 750, baseUsd: 39, discountedUsd: 23, tag: 'GOLDEN SALE', title: 'Sana Özel İndirim'),
-  ];
 
   late List<List<BigInt?>> grid;
+  bool _gridReady = false;
 
   int levelIdx = 1; // Level 1 starts
   BigInt score = BigInt.zero;
@@ -359,6 +360,21 @@ Random _rng = Random();
     'broken': 'Broken!',
     'shopTitle': 'Diamond Shop',
     'buy': 'Buy',
+    'free': 'FREE',
+    'watchAdShort': 'Watch a short video',
+    'bestValue': 'Best value',
+    'noAdsTitle': 'Remove ads',
+    'noAdsSub': 'No banner ads, forever',
+    'owned': 'Purchased',
+    'noAdsThanks': 'Ads removed – thank you!',
+    'storeUnavailable': 'Store not available right now',
+    'buyPending': 'Payment pending…',
+    'buyCanceled': 'Purchase canceled',
+    'buyError': 'Purchase failed',
+    'adNotReady': 'Ad not ready, try again soon',
+    'reshuffled': 'No moves – board shuffled',
+    'pauseText': 'Resume, or start a new board. Your diamonds are kept.',
+    'privacy': 'Privacy options',
   };
 
   static const Map<String, String> _de = {
@@ -382,6 +398,21 @@ Random _rng = Random();
     'broken': 'Zerbrochen!',
     'shopTitle': 'Diamant-Shop',
     'buy': 'Kaufen',
+    'free': 'GRATIS',
+    'watchAdShort': 'Kurzes Video ansehen',
+    'bestValue': 'Bester Preis',
+    'noAdsTitle': 'Werbung entfernen',
+    'noAdsSub': 'Keine Bannerwerbung, für immer',
+    'owned': 'Gekauft',
+    'noAdsThanks': 'Werbung entfernt – danke!',
+    'storeUnavailable': 'Shop gerade nicht verfügbar',
+    'buyPending': 'Zahlung ausstehend…',
+    'buyCanceled': 'Kauf abgebrochen',
+    'buyError': 'Kauf fehlgeschlagen',
+    'adNotReady': 'Werbung nicht bereit, bitte gleich nochmal',
+    'reshuffled': 'Keine Züge – Feld gemischt',
+    'pauseText': 'Weiterspielen oder neues Feld starten. Deine Diamanten bleiben.',
+    'privacy': 'Datenschutz-Optionen',
   };
 
   String t(String key) {
@@ -417,16 +448,227 @@ Random _rng = Random();
           _saveToBlob();
         }
       }
+      if (!_gridReady) _resetBoard(hard: true);
+      _ensureMovesAvailable();
       _startAutoSave();
+      _initBilling();
       if (!mounted) return;
       setState(() => _booting = false);
-      WidgetsBinding.instance.addPostFrameCallback((_) { /* loyalty popup removed */ });
+      // Günlük giriş ödülü (7 günlük seri). Gün içinde alınmışsa gösterilmez.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) { /* loyalty popup removed */ }
+        Future.delayed(const Duration(milliseconds: 600), () {
+          if (mounted) _showDailyLoyaltyPopupIfNeeded();
+        });
       });
     }();
   }
 
+
+  // ===== Satın alma =====
+
+  void _initBilling() {
+    final b = Billing.instance;
+    b.onDiamonds = (amount, id) {
+      if (!mounted) return;
+      diamonds += amount;
+      _animateDiamondGain(amount);
+      _showToast('+$amount 💎');
+      _saveToBlob();
+      setState(() {});
+    };
+    b.onMessage = (code) {
+      if (!mounted) return;
+      final key = switch (code) {
+        'pending' => 'buyPending',
+        'canceled' => 'buyCanceled',
+        'error' => 'buyError',
+        'noAds' => 'noAdsThanks',
+        _ => null,
+      };
+      if (key != null) _showToast(t(key));
+      setState(() {});
+    };
+    b.init().then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _buy(String id) {
+    Billing.instance.buy(id).then((started) {
+      if (!started && mounted) _showToast(t('storeUnavailable'));
+    });
+  }
+
+  void _openShopSheet() {
+    final b = Billing.instance;
+    if (b.available && b.products.isEmpty) b.refreshProducts();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF0A1434),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
+      builder: (ctx) {
+        Widget row({
+          required Widget leading,
+          required String title,
+          String? subtitle,
+          required String price,
+          required VoidCallback? onTap,
+          Color accent = const Color(0xFF8CF3FF),
+          bool highlight = false,
+        }) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 9),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(18),
+                onTap: onTap,
+                child: Ink(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(18),
+                    gradient: LinearGradient(
+                      colors: highlight
+                          ? [accent.withOpacity(0.22), accent.withOpacity(0.08)]
+                          : [Colors.white.withOpacity(0.07), Colors.white.withOpacity(0.03)],
+                    ),
+                    border: Border.all(color: highlight ? accent.withOpacity(0.7) : Colors.white.withOpacity(0.10)),
+                  ),
+                  child: Row(children: [
+                    leading,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900)),
+                          if (subtitle != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(subtitle, style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12, fontWeight: FontWeight.w600)),
+                            ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(99),
+                        gradient: LinearGradient(colors: [accent, Color.lerp(accent, Colors.black, 0.25)!]),
+                      ),
+                      child: Text(price, style: const TextStyle(color: Color(0xFF071033), fontSize: 13.5, fontWeight: FontWeight.w900)),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
+          );
+        }
+
+        Widget gemIcon(int n) {
+          final size = n >= 750 ? 34.0 : n >= 500 ? 31.0 : n >= 250 ? 28.0 : 25.0;
+          return Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(colors: [const Color(0xFF5BE7FF).withOpacity(0.45), Colors.transparent]),
+            ),
+            child: Icon(Icons.diamond_rounded, size: size, color: const Color(0xFFA8F9FF)),
+          );
+        }
+
+        return StatefulBuilder(builder: (ctx, setSheet) {
+          return ValueListenableBuilder<bool>(
+            valueListenable: b.noAds,
+            builder: (ctx, noAds, _) {
+              final packs = Skus.diamondPacks.where((id) => b.products.containsKey(id)).toList();
+              final best = packs.isEmpty ? null : packs.last;
+              return SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(width: 44, height: 5, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(99))),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(children: [
+                        const Icon(Icons.diamond_rounded, color: Color(0xFFB388FF)),
+                        const SizedBox(width: 8),
+                        Text(t('shopTitle'), style: _neon(20, opacity: 0.98)),
+                        const Spacer(),
+                        Text('$diamonds', style: _neon(16)),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.diamond_rounded, size: 16, color: Color(0xFF8CF3FF)),
+                      ]),
+                      const SizedBox(height: 14),
+                      row(
+                        leading: const SizedBox(width: 46, height: 46, child: Icon(Icons.smart_display_rounded, color: Color(0xFF5BF5B0), size: 30)),
+                        title: '+10 💎',
+                        subtitle: t('watchAdShort'),
+                        price: t('free'),
+                        accent: const Color(0xFF5BF5B0),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _watchAdForDiamonds();
+                        },
+                      ),
+                      if (!b.available)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 18),
+                          child: Text(t('storeUnavailable'), textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withOpacity(0.7))),
+                        )
+                      else if (packs.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 22),
+                          child: Center(child: SizedBox(width: 26, height: 26, child: CircularProgressIndicator(strokeWidth: 2.5))),
+                        )
+                      else
+                        ...packs.map((id) {
+                          final n = Skus.diamondsFor(id);
+                          return row(
+                            leading: gemIcon(n),
+                            title: '$n 💎',
+                            subtitle: id == best ? t('bestValue') : null,
+                            price: b.products[id]!.price,
+                            highlight: id == best,
+                            accent: id == best ? const Color(0xFFFFD76A) : const Color(0xFF8CF3FF),
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              _buy(id);
+                            },
+                          );
+                        }),
+                      if (b.products.containsKey(Skus.noAds))
+                        row(
+                          leading: const SizedBox(width: 46, height: 46, child: Icon(Icons.block_rounded, color: Color(0xFFFF8FB1), size: 30)),
+                          title: t('noAdsTitle'),
+                          subtitle: noAds ? t('owned') : t('noAdsSub'),
+                          price: noAds ? '✓' : b.products[Skus.noAds]!.price,
+                          accent: const Color(0xFFFF8FB1),
+                          onTap: noAds
+                              ? null
+                              : () {
+                                  Navigator.pop(ctx);
+                                  _buy(Skus.noAds);
+                                },
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        });
+      },
+    ).then((_) {
+      if (mounted) setState(() {});
+    });
+  }
 
   // ===== Game logic =====
 
@@ -454,16 +696,19 @@ Random _rng = Random();
     super.dispose();
   }
 
-void _resetBoard({required bool hard}) {
-    grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
-    _initFirstBoard();
-    _clearPath();
+void _resetBoard({required bool hard, bool keepDiamonds = false}) {
+    _cancelToolModes();
     if (hard) {
       score = BigInt.zero;
       levelIdx = 1;
-      diamonds = 0;
+      if (!keepDiamonds) diamonds = 0;
       swaps = 0;
     }
+    grid = List.generate(rows, (_) => List<BigInt?>.filled(cols, null));
+    _gridReady = true;
+    _initFirstBoard();
+    _clearPath();
+    _ensureMovesAvailable();
     _recalcBest();
     _saveToBlob();
     setState(() {});
@@ -669,53 +914,6 @@ void _onCellEnter(Pos p) {
 
 
 
-void _recomputeSelectionState() {
-  _armed = false;
-  _baseValue = null;
-  _baseCount = 0;
-  _stageValue = null;
-  _stageCount = 0;
-
-  if (_path.isEmpty) return;
-
-  final firstV = _valueAt(_path.first);
-  if (firstV == null) return;
-
-  _baseValue = firstV;
-
-  // count initial same-value run
-  int i = 0;
-  while (i < _path.length && _valueAt(_path[i]) == firstV) {
-    i++;
-  }
-  _baseCount = i;
-
-  if (_baseCount >= 2) {
-    _armed = true;
-    _stageValue = firstV;
-    _stageCount = _baseCount;
-
-    // walk remaining selections enforcing: same stage, or (stage even) -> next stage
-    for (int j = i; j < _path.length; j++) {
-      final v = _valueAt(_path[j]);
-      if (v == null) break;
-      final sv = _stageValue!;
-      if (v == sv) {
-        _stageCount++;
-        continue;
-      }
-      if (_stageCount >= 2 && _stageCount.isEven && v == (sv << 1)) {
-        _stageValue = sv << 1;
-        _stageCount = 1;
-        continue;
-      }
-      break;
-    }
-  }
-  _lastValue = null;
-}
-
-
 void _onCellUp() {
   if (!_dragging) return;
   _dragging = false;
@@ -777,6 +975,7 @@ void _applyMergeChain(List<Pos> chain) {
 
   // Let existing gravity + spawn animation system handle refills.
   _collapseAndFill();
+  _ensureMovesAvailable();
 
   // Treat "combo" as number of tiles consumed.
   _handleCombo(max(0, pos.length - 1));
@@ -788,41 +987,6 @@ void _applyMergeChain(List<Pos> chain) {
 }
 
 
-
-void _cascadeFrom(Pos start) {
-  // Chain merge (no collapse during cascade):
-  // While the tile has an equal neighbour (8-direction), merge pairwise into this tile.
-  Pos cur = start;
-  while (true) {
-    final v = grid[cur.r][cur.c];
-    if (v == null) return;
-
-    Pos? neighborSame;
-    for (int dr = -1; dr <= 1; dr++) {
-      for (int dc = -1; dc <= 1; dc++) {
-        if (dr == 0 && dc == 0) continue;
-        final p = Pos(cur.r + dr, cur.c + dc);
-        if (!_inBounds(p)) continue;
-        if (grid[p.r][p.c] == v) {
-          neighborSame = p;
-          break;
-        }
-      }
-      if (neighborSame != null) break;
-    }
-    if (neighborSame == null) return;
-
-    // Consume neighbour into current.
-    grid[neighborSame.r][neighborSame.c] = null;
-    final newV = v * BigInt.from(2);
-    grid[cur.r][cur.c] = newV;
-
-    // Score adds the produced value.
-    score += newV;
-    _animateCoinGain(3);
-    _recalcBest();
-  }
-}
 
 void _collapseAndFill() {
   // Gravity collapse downwards per column, then fill empties with spawn values.
@@ -869,8 +1033,54 @@ void _collapseAndFill() {
 }
 
 
+  /// En az bir hamle var mı: 8 yönde aynı değerli iki komşu taş.
+  bool _hasAnyMove() {
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        final v = grid[r][c];
+        if (v == null) continue;
+        for (int dr = -1; dr <= 1; dr++) {
+          for (int dc = -1; dc <= 1; dc++) {
+            if (dr == 0 && dc == 0) continue;
+            final p = Pos(r + dr, c + dc);
+            if (_inBounds(p) && grid[p.r][p.c] == v) return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  /// Hamle kalmadıysa taşları karıştırır; yine olmazsa bir taşı komşusuyla eşitler.
+  void _ensureMovesAvailable() {
+    if (_hasAnyMove()) return;
+    final vals = <BigInt>[for (final row in grid) for (final v in row) if (v != null) v];
+    for (int attempt = 0; attempt < 30; attempt++) {
+      vals.shuffle(_rng);
+      int i = 0;
+      for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+          grid[r][c] = i < vals.length ? vals[i++] : _spawnTile();
+        }
+      }
+      if (_hasAnyMove()) break;
+    }
+    if (!_hasAnyMove()) grid[0][1] = grid[0][0];
+    _spawnTick++;
+    _showToast(t('reshuffled'));
+  }
+
   // Wrapper kept for compatibility with older call sites.
   BigInt _spawnValue() => _spawnTile();
+
+  /// Kombo elmas ödülü: 5→+1, 8→+2, 11→+3, 14 ve üstü→+5.
+  static int _comboReward(int merges) {
+    if (merges >= 14) return 5;
+    if (merges >= 11) return 3;
+    if (merges >= 8) return 2;
+    if (merges >= 5) return 1;
+    return 0;
+  }
 
   void _handleCombo(int merges) {
     _lastCombo = merges;
@@ -890,14 +1100,14 @@ void _collapseAndFill() {
       title = 'NICE';
     }
 
-    if (merges >= 11) {
-      diamonds += 1;
-      _animateDiamondGain(1);
+    final reward = _comboReward(merges);
+    if (reward > 0) {
+      diamonds += reward;
+      _animateDiamondGain(reward);
     }
 
-    final chainLine = merges >= 11
-        ? (lang == AppLang.de ? '${merges}x KETTE  •  +1 💎' : '${merges}x CHAIN  •  +1 💎')
-        : (lang == AppLang.de ? '${merges}x KETTE' : '${merges}x CHAIN');
+    final chainWord = lang == AppLang.de ? 'KETTE' : 'CHAIN';
+    final chainLine = '${merges}x $chainWord  •  +$reward 💎';
 
     _comboTimer?.cancel();
     _comboMsg = '$title\nCOMBO!\n$chainLine';
@@ -906,7 +1116,7 @@ void _collapseAndFill() {
     _shimmerCtrl.repeat(period: const Duration(milliseconds: 900));
     // Small toast removed to avoid double-combo animation feeling.
 
-    _comboTimer = Timer(const Duration(milliseconds: 5600), () {
+    _comboTimer = Timer(const Duration(milliseconds: 1800), () {
       if (!mounted) return;
       _shimmerCtrl.stop();
       _comboCtrl.stop();
@@ -969,6 +1179,8 @@ void _collapseAndFill() {
     swapMode = false;
     _swapFirst = null;
     _showToast(t('swap'));
+    _ensureMovesAvailable();
+    _saveToBlob();
     setState(() {});
   }
 
@@ -978,65 +1190,71 @@ void _collapseAndFill() {
     _collapseAndFill();
     hammerMode = false;
     _showToast(t('broken'));
-    setState(() {});
-  }
-
-  void _toggleSwap() {
-  if (!swapMode) {
-    if (diamonds < 10) {
-      _showToast(t('notEnoughDiamonds'));
-      return;
-    }
-    diamonds -= 10;
-    swapMode = true;
-    hammerMode = false;
-    duplicateMode = false;
-    _swapFirst = null;
-    _showToast('-10 💎');
-  } else {
-    swapMode = false;
-    _swapFirst = null;
-  }
-  _saveToBlob();
-  setState(() {});
-}
-
-  void _toggleHammer() {
-    if (!hammerMode) {
-      if (diamonds < 7) {
-        _showToast(t('notEnoughDiamonds'));
-        return;
-      }
-      diamonds -= 7;
-      hammerMode = true;
-      swapMode = false;
-      _swapFirst = null;
-      _showToast('-7 💎');
-    } else {
-      hammerMode = false;
-    }
+    _ensureMovesAvailable();
     _saveToBlob();
     setState(() {});
   }
 
-void _toggleDuplicate() {
-  if (!duplicateMode) {
-    if (diamonds < 20) {
-      _showToast(t('notEnoughDiamonds'));
-      return;
+  static const int _costSwap = 10;
+  static const int _costHammer = 7;
+  static const int _costDuplicate = 20;
+
+  /// Aktif araç modunu kapatır; araç kullanılmadan kapatıldıysa elmasları iade eder.
+  void _cancelToolModes({bool refund = true}) {
+    if (refund) {
+      if (swapMode) diamonds += _costSwap;
+      if (hammerMode) diamonds += _costHammer;
+      if (duplicateMode) diamonds += _costDuplicate;
     }
-    diamonds -= 20;
-    duplicateMode = true;
     swapMode = false;
     hammerMode = false;
-    _swapFirst = null;
-    _showToast('-20 💎');
-  } else {
     duplicateMode = false;
+    _swapFirst = null;
   }
-  _saveToBlob();
-  setState(() {});
-}
+
+  void _activateTool(int cost, void Function() setMode) {
+    _cancelToolModes();
+    if (diamonds < cost) {
+      _showToast(t('notEnoughDiamonds'));
+      setState(() {});
+      return;
+    }
+    diamonds -= cost;
+    setMode();
+    _showToast('-$cost 💎');
+    _saveToBlob();
+    setState(() {});
+  }
+
+  void _toggleSwap() {
+    if (swapMode) {
+      _cancelToolModes();
+      _saveToBlob();
+      setState(() {});
+      return;
+    }
+    _activateTool(_costSwap, () => swapMode = true);
+  }
+
+  void _toggleHammer() {
+    if (hammerMode) {
+      _cancelToolModes();
+      _saveToBlob();
+      setState(() {});
+      return;
+    }
+    _activateTool(_costHammer, () => hammerMode = true);
+  }
+
+  void _toggleDuplicate() {
+    if (duplicateMode) {
+      _cancelToolModes();
+      _saveToBlob();
+      setState(() {});
+      return;
+    }
+    _activateTool(_costDuplicate, () => duplicateMode = true);
+  }
 
 void _handleDuplicateTap(Pos p) {
   final v = _valueAt(p);
@@ -1044,6 +1262,8 @@ void _handleDuplicateTap(Pos p) {
   grid[p.r][p.c] = v << 1;
   duplicateMode = false;
   _showToast('x2');
+  _recalcBest();
+  _checkGoalAndMaybeAdvance();
   _saveToBlob();
   setState(() {});
 }
@@ -1051,11 +1271,15 @@ void _handleDuplicateTap(Pos p) {
   void _watchAdForDiamonds() => _watchAdReward();
 
   void _watchAdReward() {
-  diamonds += 10;
-  _animateDiamondGain(10);
-  _showToast('+10 💎');
-  _saveToBlob();
-  setState(() {});
+  final shown = Ads.instance.showRewarded(() {
+    if (!mounted) return;
+    diamonds += 10;
+    _animateDiamondGain(10);
+    _showToast('+10 💎');
+    _saveToBlob();
+    setState(() {});
+  });
+  if (!shown) _showToast(t('adNotReady'));
 }
 
 
@@ -1153,7 +1377,6 @@ void _handleDuplicateTap(Pos p) {
 
 
 
-  void _showLaunchOfferIfNeeded() {}
 
   String _todayKey() {
     final d = DateTime.now();
@@ -1490,7 +1713,7 @@ void _handleDuplicateTap(Pos p) {
                                     ),
                                     child: Text(
                                       isDe
-                                          ? 'HEUTE: +$reward ELMAS'
+                                          ? 'HEUTE: +$reward DIAMANTEN'
                                           : 'TODAY: +$reward DIAMONDS',
                                       style: TextStyle(
                                         color: Colors.white,
@@ -1678,7 +1901,12 @@ void _handleDuplicateTap(Pos p) {
               children: [
                 _buildHeader(nowLabel: nowLabel, maxLabel: maxLabel, goalLabel: goalLabel, ratio: ratio),
                 const SizedBox(height: 10),
-                Expanded(child: _buildBoard()),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: _buildBoard(),
+                  ),
+                ),
                 const SizedBox(height: 6),
               ],
             ),
@@ -1960,30 +2188,8 @@ void _handleDuplicateTap(Pos p) {
   }
 
   Widget _buildBannerAdPlaceholder() {
-    // Phase 1: fixed-size banner slot to prevent board overlap.
-    // Replace this Container with real AdMob Banner widget when integrating ads.
-    return SizedBox(
-      height: kBannerHeight,
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(14, 0, 14, 6),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withOpacity(0.10)),
-        ),
-        child: Center(
-          child: Text(
-            'BANNER AD',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.65),
-              fontSize: 12,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1.1,
-            ),
-          ),
-        ),
-      ),
-    );
+    // Sabit yükseklik: reklam yüklenmese de tahta kaymaz.
+    return const BannerSlot(height: kBannerHeight);
   }
 
   Widget _buildHeader({
@@ -2324,125 +2530,72 @@ Widget _buildBoard() {
 
 
   Widget _buildBottomBar() {
+    final scale = uiScale;
     return Container(
-      padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+      margin: EdgeInsets.fromLTRB(10 * scale, 0, 10 * scale, 6 * scale),
+      padding: EdgeInsets.fromLTRB(8 * scale, 8 * scale, 8 * scale, 8 * scale),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        borderRadius: BorderRadius.circular(26 * scale),
+        gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFF0A1638), Color(0xFF06102C)],
+          colors: [const Color(0xFF16224E).withOpacity(0.96), const Color(0xFF0B1434).withOpacity(0.98)],
         ),
-        border: const Border(top: BorderSide(color: Colors.white12)),
-        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 24, offset: Offset(0, -8))],
+        border: Border.all(color: Colors.white.withOpacity(0.10)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.55), blurRadius: 26, offset: const Offset(0, 10)),
+          BoxShadow(color: const Color(0xFF7C5CFF).withOpacity(0.10), blurRadius: 30, spreadRadius: 1),
+        ],
       ),
       child: Row(children: [
-        Expanded(child: _actionButton(icon: swapMode ? Icons.close : Icons.swap_horiz_rounded, label: t('swap'), sub: '10', active: swapMode, onTap: _toggleSwap, accent: const Color(0xFF74F9FF), showLabel: false)),
-        const SizedBox(width: 6),
-        Expanded(child: _actionButton(icon: hammerMode ? Icons.close : Icons.gavel_rounded, label: t('hammer'), sub: '7', active: hammerMode, onTap: _toggleHammer, accent: const Color(0xFFFFB870), showLabel: false)),
-        const SizedBox(width: 6),
-        Expanded(child: _actionButton(icon: duplicateMode ? Icons.close : Icons.copy_rounded, label: t('duplicate'), sub: '12', active: duplicateMode, onTap: _toggleDuplicate, accent: const Color(0xFF9B8CFF), showLabel: false)),
-        const SizedBox(width: 6),
-        Expanded(child: _actionButton(icon: Icons.play_circle_fill_rounded, label: t('watchAd'), sub: '+10', onTap: _watchAdForDiamonds, accent: const Color(0xFF61F2A7), showLabel: false)),
-        const SizedBox(width: 6),
-        Expanded(child: _actionButton(icon: Icons.shopping_bag_rounded, label: t('shop'), sub: '', onTap: _openShopSheet, accent: const Color(0xFFFFD76A), iconOnly: true, showSub: false)),
-      ]),
-    );
-  }
-
-  Widget _actionButton({
-    required IconData icon,
-    required String label,
-    required String sub,
-    required VoidCallback onTap,
-    bool active = false,
-    bool iconOnly = false,
-    bool showLabel = true,
-    bool showSub = true,
-    Color? accent,
-  }) {
-    final scale = uiScale;
-    final accentColor = accent ?? const Color(0xFF7DF9FF);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 58 * scale,
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(active ? 0.15 : 0.08),
-          borderRadius: BorderRadius.circular(16 * scale),
-          border: Border.all(color: active ? accentColor.withOpacity(0.70) : Colors.white.withOpacity(0.10)),
-          boxShadow: [if (active) BoxShadow(color: accentColor.withOpacity(0.22), blurRadius: 16)],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: (iconOnly ? 32 : 26) * scale, color: (active ? accentColor : Colors.white).withOpacity(0.97)),
-            if (!iconOnly && showSub) ...[
-              SizedBox(height: 2 * scale),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.diamond_rounded, size: 12 * scale, color: const Color(0xFF8CF3FF)),
-                  SizedBox(width: 4 * scale),
-                  Text(sub, style: _neon(12 * scale, opacity: 0.95)),
-                ],
-              ),
-            ] else if (!iconOnly && showLabel) ...[
-              SizedBox(height: 2 * scale),
-              Text(label, style: _neon(11 * scale, opacity: 0.9)),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-
-  void _openShopSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF06102C),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
-      builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Diamond Shop', style: _neon(18, opacity: 0.98)),
-                const SizedBox(height: 10),
-                ...([..._shopOffers]..sort((a, b) => a.gems.compareTo(b.gems))).map((o) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.white.withOpacity(0.10)),
-                    ),
-                    child: Row(children: [
-                      const Icon(Icons.diamond, color: Color(0xFF8CF3FF)),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text('${o.gems} • \$${o.discountedUsd}', style: _neon(13, opacity: 0.95))),
-                      FilledButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          diamonds += o.gems;
-                          _animateDiamondGain(o.gems);
-                          _saveToBlob();
-                          _showToast('+${o.gems} 💎');
-                          setState(() {});
-                        },
-                        child: const Text('Buy'),
-                      ),
-                    ]),
-                  ),
-                )),
-              ],
-            ),
+        Expanded(
+          child: _ToolButton(
+            icon: Icons.swap_horiz_rounded,
+            label: t('swap'),
+            cost: _costSwap,
+            accent: const Color(0xFF3DE8FF),
+            active: swapMode,
+            affordable: diamonds >= _costSwap,
+            scale: scale,
+            onTap: _toggleSwap,
           ),
-        );
-      },
+        ),
+        SizedBox(width: 7 * scale),
+        Expanded(
+          child: _ToolButton(
+            icon: Icons.gavel_rounded,
+            label: t('hammer'),
+            cost: _costHammer,
+            accent: const Color(0xFFFF9F45),
+            active: hammerMode,
+            affordable: diamonds >= _costHammer,
+            scale: scale,
+            onTap: _toggleHammer,
+          ),
+        ),
+        SizedBox(width: 7 * scale),
+        Expanded(
+          child: _ToolButton(
+            icon: Icons.auto_awesome_motion_rounded,
+            label: 'x2',
+            cost: _costDuplicate,
+            accent: const Color(0xFFB07BFF),
+            active: duplicateMode,
+            affordable: diamonds >= _costDuplicate,
+            scale: scale,
+            onTap: _toggleDuplicate,
+          ),
+        ),
+        SizedBox(width: 7 * scale),
+        Expanded(
+          child: _AdRewardButton(
+            label: t('free'),
+            amount: 10,
+            scale: scale,
+            onTap: _watchAdForDiamonds,
+          ),
+        ),
+      ]),
     );
   }
 
@@ -2467,7 +2620,21 @@ Widget _buildBoard() {
                     ButtonSegment(value: AppLang.de, label: Text('DE')),
                   ],
                   selected: {lang},
-                  onSelectionChanged: (s) => setState(() => lang = s.first),
+                  onSelectionChanged: (s) {
+                    setState(() => lang = s.first);
+                    _saveToBlob();
+                  },
+                ),
+              ),
+              const SizedBox(height: 10),
+              _settingsRow(
+                title: t('privacy'),
+                child: OutlinedButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    Ads.instance.showPrivacyOptions();
+                  },
+                  child: const Icon(Icons.privacy_tip_outlined, size: 18),
                 ),
               ),
               const SizedBox(height: 10),
@@ -2513,7 +2680,7 @@ Widget _buildBoard() {
         backgroundColor: const Color(0xFF0B163A),
         title: Text(t('pause'), style: _neon(18)),
         content: Text(
-          'Swap / Tokmak modunu kapatıp oyuna dönebilir veya yeniden başlatabilirsin.',
+          t('pauseText'),
           style: TextStyle(color: Colors.white.withOpacity(0.75)),
         ),
         actions: [
@@ -2521,7 +2688,7 @@ Widget _buildBoard() {
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
-              _resetBoard(hard: true);
+              _resetBoard(hard: true, keepDiamonds: true);
             },
             child: Text(t('restart')),
           ),
@@ -2826,6 +2993,229 @@ class _CoinFlyWidgetState extends State<_CoinFlyWidget> with SingleTickerProvide
           ),
         )]);
       },
+    );
+  }
+}
+
+
+/// Alt çubuktaki araç düğmesi: renkli ikon rozeti, ad ve elmas fiyat kapsülü.
+/// Basınca hafifçe küçülür; aktifken parlar ve iptal (×) gösterir;
+/// elmas yetmiyorsa soluk görünür.
+class _ToolButton extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final int cost;
+  final Color accent;
+  final bool active;
+  final bool affordable;
+  final double scale;
+  final VoidCallback onTap;
+
+  const _ToolButton({
+    required this.icon,
+    required this.label,
+    required this.cost,
+    required this.accent,
+    required this.active,
+    required this.affordable,
+    required this.scale,
+    required this.onTap,
+  });
+
+  @override
+  State<_ToolButton> createState() => _ToolButtonState();
+}
+
+class _ToolButtonState extends State<_ToolButton> {
+  bool _down = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.scale;
+    final a = widget.accent;
+    final dim = !widget.affordable && !widget.active;
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _down = true),
+      onTapCancel: () => setState(() => _down = false),
+      onTapUp: (_) => setState(() => _down = false),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        widget.onTap();
+      },
+      child: AnimatedScale(
+        scale: _down ? 0.93 : 1.0,
+        duration: const Duration(milliseconds: 90),
+        child: AnimatedOpacity(
+          opacity: dim ? 0.55 : 1.0,
+          duration: const Duration(milliseconds: 200),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            height: 92 * s,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20 * s),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: widget.active
+                    ? [a.withOpacity(0.42), a.withOpacity(0.16)]
+                    : [Colors.white.withOpacity(0.09), Colors.white.withOpacity(0.03)],
+              ),
+              border: Border.all(
+                color: widget.active ? a.withOpacity(0.95) : Colors.white.withOpacity(0.10),
+                width: widget.active ? 1.6 : 1.0,
+              ),
+              boxShadow: [
+                if (widget.active) BoxShadow(color: a.withOpacity(0.45), blurRadius: 18, spreadRadius: 1),
+              ],
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 36 * s,
+                  height: 36 * s,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(colors: [a.withOpacity(0.95), a.withOpacity(0.55)]),
+                    boxShadow: [BoxShadow(color: a.withOpacity(0.55), blurRadius: 12)],
+                  ),
+                  child: Icon(
+                    widget.active ? Icons.close_rounded : widget.icon,
+                    size: 21 * s,
+                    color: const Color(0xFF0A1030),
+                  ),
+                ),
+                SizedBox(height: 5 * s),
+                Text(
+                  widget.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.92),
+                    fontSize: 10.5 * s,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                SizedBox(height: 4 * s),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 7 * s, vertical: 2 * s),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(99),
+                    color: Colors.black.withOpacity(0.28),
+                    border: Border.all(color: const Color(0xFF8CF3FF).withOpacity(0.25)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.diamond_rounded, size: 11 * s, color: const Color(0xFF8CF3FF)),
+                      SizedBox(width: 3 * s),
+                      Text(
+                        '${widget.cost}',
+                        style: TextStyle(color: Colors.white, fontSize: 11 * s, fontWeight: FontWeight.w800),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Ödüllü reklam düğmesi: yeşil dolgu, yavaşça "nefes alan" parıltı.
+class _AdRewardButton extends StatefulWidget {
+  final String label;
+  final int amount;
+  final double scale;
+  final VoidCallback onTap;
+
+  const _AdRewardButton({required this.label, required this.amount, required this.scale, required this.onTap});
+
+  @override
+  State<_AdRewardButton> createState() => _AdRewardButtonState();
+}
+
+class _AdRewardButtonState extends State<_AdRewardButton> with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))..repeat(reverse: true);
+  bool _down = false;
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.scale;
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _down = true),
+      onTapCancel: () => setState(() => _down = false),
+      onTapUp: (_) => setState(() => _down = false),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        widget.onTap();
+      },
+      child: AnimatedScale(
+        scale: _down ? 0.93 : 1.0,
+        duration: const Duration(milliseconds: 90),
+        child: AnimatedBuilder(
+          animation: _pulse,
+          builder: (context, child) {
+            final g = Curves.easeInOut.transform(_pulse.value);
+            return Container(
+              height: 92 * s,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20 * s),
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF5BF5B0), Color(0xFF16C98A), Color(0xFF0E9E8C)],
+                ),
+                border: Border.all(color: Colors.white.withOpacity(0.35 + 0.25 * g)),
+                boxShadow: [
+                  BoxShadow(color: const Color(0xFF3DF2A0).withOpacity(0.25 + 0.30 * g), blurRadius: 12 + 10 * g, spreadRadius: g),
+                ],
+              ),
+              child: child,
+            );
+          },
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.smart_display_rounded, size: 28 * s, color: const Color(0xFF06261C)),
+              SizedBox(height: 3 * s),
+              Text(
+                widget.label,
+                style: TextStyle(
+                  color: const Color(0xFF06261C),
+                  fontSize: 10.5 * s,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.0,
+                ),
+              ),
+              SizedBox(height: 2 * s),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '+${widget.amount}',
+                    style: TextStyle(color: const Color(0xFF06261C), fontSize: 14 * s, fontWeight: FontWeight.w900),
+                  ),
+                  SizedBox(width: 2 * s),
+                  Icon(Icons.diamond_rounded, size: 13 * s, color: const Color(0xFF06261C)),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

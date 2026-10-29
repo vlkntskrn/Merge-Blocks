@@ -1,0 +1,58 @@
+name: Screenshots
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "fix/release-readiness" ]
+    paths: [ "lib/**", ".github/workflows/screenshots.yml" ]
+
+permissions:
+  contents: write
+
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build web
+        run: |
+          flutter pub get
+          flutter build web --release --no-web-resources-cdn
+
+      - name: Take screenshots
+        run: |
+          cd build/web && (python3 -m http.server 8080 >/dev/null 2>&1 &) && cd ../..
+          mkdir -p /tmp/shots && cd /tmp/shots
+          npm init -y >/dev/null && npm i playwright@1.48.2 >/dev/null && npx playwright install --with-deps chromium >/dev/null
+          cat > shot.js <<'EOF'
+          const { chromium } = require('playwright');
+          (async () => {
+            const b = await chromium.launch();
+            const p = await b.newPage({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+            const vals = [8,4,16,4,32,16,4,16,2,32,2,16,2,4,2,32,4,32,4,2,8,16,4,16,4,8,32,16,2,8,8,16,16,32,2];
+            const save = { rows: 7, cols: 5, grid: vals.map(String), score: '1280', best: '64', levelIdx: 1, diamonds: 45, swaps: 0, lang: 'en', dailyStreak: 0, dailyLastClaim: null };
+            await p.addInitScript(v => { localStorage.setItem('flutter.merge_blocks_save_v1', JSON.stringify(v)); }, JSON.stringify(save));
+            await p.goto('http://localhost:8080/', { waitUntil: 'networkidle' });
+            await p.waitForTimeout(8000);
+            await p.screenshot({ path: '/tmp/shots/01-acilis.png' });
+            await p.mouse.click(158, 810);
+            await p.waitForTimeout(700);
+            await p.screenshot({ path: '/tmp/shots/02-arac-secili.png' });
+            await b.close();
+          })();
+          EOF
+          node shot.js
+
+      - name: Push screenshots branch
+        run: |
+          cd /tmp/shots
+          git init -q -b screenshots
+          git add *.png
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "screenshots ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" screenshots

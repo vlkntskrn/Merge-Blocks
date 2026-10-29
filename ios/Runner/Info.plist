@@ -8,6 +8,10 @@
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
 	<string>Merge Blocks</string>
+	<!-- AdMob App ID (Google'ın iOS TEST kimliği). google_mobile_ads paketi bağlıyken bu anahtar yoksa uygulama açılışta çöker.
+	     Yayından önce AdMob'daki kendi iOS App ID'nizle değiştirin. -->
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-3940256099942544~1458002511</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

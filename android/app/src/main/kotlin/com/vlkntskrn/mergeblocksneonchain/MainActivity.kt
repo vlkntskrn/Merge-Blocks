@@ -1,4 +1,4 @@
-package com.example.merge_blocks
+package com.vlkntskrn.mergeblocksneonchain
 
 import io.flutter.embedding.android.FlutterActivity
 
