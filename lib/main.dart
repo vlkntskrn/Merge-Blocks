@@ -359,6 +359,7 @@ Random _rng = Random();
     'broken': 'Broken!',
     'shopTitle': 'Diamond Shop',
     'buy': 'Buy',
+    'free': 'FREE',
     'adNotReady': 'Ad not ready, try again soon',
     'reshuffled': 'No moves – board shuffled',
     'pauseText': 'Resume, or start a new board. Your diamonds are kept.',
@@ -386,6 +387,7 @@ Random _rng = Random();
     'broken': 'Zerbrochen!',
     'shopTitle': 'Diamant-Shop',
     'buy': 'Kaufen',
+    'free': 'GRATIS',
     'adNotReady': 'Werbung nicht bereit, bitte gleich nochmal',
     'reshuffled': 'Keine Züge – Feld gemischt',
     'pauseText': 'Weiterspielen oder neues Feld starten. Deine Diamanten bleiben.',
@@ -1743,7 +1745,12 @@ void _handleDuplicateTap(Pos p) {
               children: [
                 _buildHeader(nowLabel: nowLabel, maxLabel: maxLabel, goalLabel: goalLabel, ratio: ratio),
                 const SizedBox(height: 10),
-                Expanded(child: _buildBoard()),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: _buildBoard(),
+                  ),
+                ),
                 const SizedBox(height: 6),
               ],
             ),
@@ -2367,25 +2374,71 @@ Widget _buildBoard() {
 
 
   Widget _buildBottomBar() {
+    final scale = uiScale;
     return Container(
-      padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+      margin: EdgeInsets.fromLTRB(10 * scale, 0, 10 * scale, 6 * scale),
+      padding: EdgeInsets.fromLTRB(8 * scale, 8 * scale, 8 * scale, 8 * scale),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        borderRadius: BorderRadius.circular(26 * scale),
+        gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFF0A1638), Color(0xFF06102C)],
+          colors: [const Color(0xFF16224E).withOpacity(0.96), const Color(0xFF0B1434).withOpacity(0.98)],
         ),
-        border: const Border(top: BorderSide(color: Colors.white12)),
-        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 24, offset: Offset(0, -8))],
+        border: Border.all(color: Colors.white.withOpacity(0.10)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.55), blurRadius: 26, offset: const Offset(0, 10)),
+          BoxShadow(color: const Color(0xFF7C5CFF).withOpacity(0.10), blurRadius: 30, spreadRadius: 1),
+        ],
       ),
       child: Row(children: [
-        Expanded(child: _actionButton(icon: swapMode ? Icons.close : Icons.swap_horiz_rounded, label: t('swap'), sub: '$_costSwap', active: swapMode, onTap: _toggleSwap, accent: const Color(0xFF74F9FF), showLabel: false)),
-        const SizedBox(width: 6),
-        Expanded(child: _actionButton(icon: hammerMode ? Icons.close : Icons.gavel_rounded, label: t('hammer'), sub: '$_costHammer', active: hammerMode, onTap: _toggleHammer, accent: const Color(0xFFFFB870), showLabel: false)),
-        const SizedBox(width: 6),
-        Expanded(child: _actionButton(icon: duplicateMode ? Icons.close : Icons.copy_rounded, label: t('duplicate'), sub: '$_costDuplicate', active: duplicateMode, onTap: _toggleDuplicate, accent: const Color(0xFF9B8CFF), showLabel: false)),
-        const SizedBox(width: 6),
-        Expanded(child: _actionButton(icon: Icons.play_circle_fill_rounded, label: t('watchAd'), sub: '+10', onTap: _watchAdForDiamonds, accent: const Color(0xFF61F2A7), showLabel: false)),
+        Expanded(
+          child: _ToolButton(
+            icon: Icons.swap_horiz_rounded,
+            label: t('swap'),
+            cost: _costSwap,
+            accent: const Color(0xFF3DE8FF),
+            active: swapMode,
+            affordable: diamonds >= _costSwap,
+            scale: scale,
+            onTap: _toggleSwap,
+          ),
+        ),
+        SizedBox(width: 7 * scale),
+        Expanded(
+          child: _ToolButton(
+            icon: Icons.gavel_rounded,
+            label: t('hammer'),
+            cost: _costHammer,
+            accent: const Color(0xFFFF9F45),
+            active: hammerMode,
+            affordable: diamonds >= _costHammer,
+            scale: scale,
+            onTap: _toggleHammer,
+          ),
+        ),
+        SizedBox(width: 7 * scale),
+        Expanded(
+          child: _ToolButton(
+            icon: Icons.auto_awesome_motion_rounded,
+            label: 'x2',
+            cost: _costDuplicate,
+            accent: const Color(0xFFB07BFF),
+            active: duplicateMode,
+            affordable: diamonds >= _costDuplicate,
+            scale: scale,
+            onTap: _toggleDuplicate,
+          ),
+        ),
+        SizedBox(width: 7 * scale),
+        Expanded(
+          child: _AdRewardButton(
+            label: t('free'),
+            amount: 10,
+            scale: scale,
+            onTap: _watchAdForDiamonds,
+          ),
+        ),
       ]),
     );
   }
@@ -2832,6 +2885,229 @@ class _CoinFlyWidgetState extends State<_CoinFlyWidget> with SingleTickerProvide
           ),
         )]);
       },
+    );
+  }
+}
+
+
+/// Alt çubuktaki araç düğmesi: renkli ikon rozeti, ad ve elmas fiyat kapsülü.
+/// Basınca hafifçe küçülür; aktifken parlar ve iptal (×) gösterir;
+/// elmas yetmiyorsa soluk görünür.
+class _ToolButton extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final int cost;
+  final Color accent;
+  final bool active;
+  final bool affordable;
+  final double scale;
+  final VoidCallback onTap;
+
+  const _ToolButton({
+    required this.icon,
+    required this.label,
+    required this.cost,
+    required this.accent,
+    required this.active,
+    required this.affordable,
+    required this.scale,
+    required this.onTap,
+  });
+
+  @override
+  State<_ToolButton> createState() => _ToolButtonState();
+}
+
+class _ToolButtonState extends State<_ToolButton> {
+  bool _down = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.scale;
+    final a = widget.accent;
+    final dim = !widget.affordable && !widget.active;
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _down = true),
+      onTapCancel: () => setState(() => _down = false),
+      onTapUp: (_) => setState(() => _down = false),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        widget.onTap();
+      },
+      child: AnimatedScale(
+        scale: _down ? 0.93 : 1.0,
+        duration: const Duration(milliseconds: 90),
+        child: AnimatedOpacity(
+          opacity: dim ? 0.55 : 1.0,
+          duration: const Duration(milliseconds: 200),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            height: 82 * s,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20 * s),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: widget.active
+                    ? [a.withOpacity(0.42), a.withOpacity(0.16)]
+                    : [Colors.white.withOpacity(0.09), Colors.white.withOpacity(0.03)],
+              ),
+              border: Border.all(
+                color: widget.active ? a.withOpacity(0.95) : Colors.white.withOpacity(0.10),
+                width: widget.active ? 1.6 : 1.0,
+              ),
+              boxShadow: [
+                if (widget.active) BoxShadow(color: a.withOpacity(0.45), blurRadius: 18, spreadRadius: 1),
+              ],
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 36 * s,
+                  height: 36 * s,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(colors: [a.withOpacity(0.95), a.withOpacity(0.55)]),
+                    boxShadow: [BoxShadow(color: a.withOpacity(0.55), blurRadius: 12)],
+                  ),
+                  child: Icon(
+                    widget.active ? Icons.close_rounded : widget.icon,
+                    size: 21 * s,
+                    color: const Color(0xFF0A1030),
+                  ),
+                ),
+                SizedBox(height: 5 * s),
+                Text(
+                  widget.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.92),
+                    fontSize: 10.5 * s,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                SizedBox(height: 4 * s),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 7 * s, vertical: 2 * s),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(99),
+                    color: Colors.black.withOpacity(0.28),
+                    border: Border.all(color: const Color(0xFF8CF3FF).withOpacity(0.25)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.diamond_rounded, size: 11 * s, color: const Color(0xFF8CF3FF)),
+                      SizedBox(width: 3 * s),
+                      Text(
+                        '${widget.cost}',
+                        style: TextStyle(color: Colors.white, fontSize: 11 * s, fontWeight: FontWeight.w800),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Ödüllü reklam düğmesi: yeşil dolgu, yavaşça "nefes alan" parıltı.
+class _AdRewardButton extends StatefulWidget {
+  final String label;
+  final int amount;
+  final double scale;
+  final VoidCallback onTap;
+
+  const _AdRewardButton({required this.label, required this.amount, required this.scale, required this.onTap});
+
+  @override
+  State<_AdRewardButton> createState() => _AdRewardButtonState();
+}
+
+class _AdRewardButtonState extends State<_AdRewardButton> with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))..repeat(reverse: true);
+  bool _down = false;
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.scale;
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _down = true),
+      onTapCancel: () => setState(() => _down = false),
+      onTapUp: (_) => setState(() => _down = false),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        widget.onTap();
+      },
+      child: AnimatedScale(
+        scale: _down ? 0.93 : 1.0,
+        duration: const Duration(milliseconds: 90),
+        child: AnimatedBuilder(
+          animation: _pulse,
+          builder: (context, child) {
+            final g = Curves.easeInOut.transform(_pulse.value);
+            return Container(
+              height: 82 * s,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20 * s),
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF5BF5B0), Color(0xFF16C98A), Color(0xFF0E9E8C)],
+                ),
+                border: Border.all(color: Colors.white.withOpacity(0.35 + 0.25 * g)),
+                boxShadow: [
+                  BoxShadow(color: const Color(0xFF3DF2A0).withOpacity(0.25 + 0.30 * g), blurRadius: 12 + 10 * g, spreadRadius: g),
+                ],
+              ),
+              child: child,
+            );
+          },
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.smart_display_rounded, size: 28 * s, color: const Color(0xFF06261C)),
+              SizedBox(height: 3 * s),
+              Text(
+                widget.label,
+                style: TextStyle(
+                  color: const Color(0xFF06261C),
+                  fontSize: 10.5 * s,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.0,
+                ),
+              ),
+              SizedBox(height: 2 * s),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '+${widget.amount}',
+                    style: TextStyle(color: const Color(0xFF06261C), fontSize: 14 * s, fontWeight: FontWeight.w900),
+                  ),
+                  SizedBox(width: 2 * s),
+                  Icon(Icons.diamond_rounded, size: 13 * s, color: const Color(0xFF06261C)),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

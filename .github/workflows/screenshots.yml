@@ -35,17 +35,15 @@ jobs:
           (async () => {
             const b = await chromium.launch();
             const p = await b.newPage({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
-            p.on('console', m => console.log('console:', m.text()));
+            const vals = [8,4,16,4,32,16,4,16,2,32,2,16,2,4,2,32,4,32,4,2,8,16,4,16,4,8,32,16,2,8,8,16,16,32,2];
+            const save = { rows: 7, cols: 5, grid: vals.map(String), score: '1280', best: '64', levelIdx: 1, diamonds: 45, swaps: 0, lang: 'en', dailyStreak: 0, dailyLastClaim: null };
+            await p.addInitScript(v => { localStorage.setItem('flutter.merge_blocks_save_v1', JSON.stringify(v)); }, JSON.stringify(save));
             await p.goto('http://localhost:8080/', { waitUntil: 'networkidle' });
             await p.waitForTimeout(8000);
             await p.screenshot({ path: '/tmp/shots/01-acilis.png' });
-            // Ortadaki taşlara dokunup bir zincir sürükle (görünüm için)
-            await p.mouse.move(120, 420); await p.mouse.down();
-            for (const [x, y] of [[200, 420], [280, 420], [280, 500], [200, 500]]) { await p.mouse.move(x, y, { steps: 6 }); }
-            await p.screenshot({ path: '/tmp/shots/02-zincir.png' });
-            await p.mouse.up();
-            await p.waitForTimeout(1500);
-            await p.screenshot({ path: '/tmp/shots/03-birlesme.png' });
+            await p.mouse.click(158, 810);
+            await p.waitForTimeout(700);
+            await p.screenshot({ path: '/tmp/shots/02-arac-secili.png' });
             await b.close();
           })();
           EOF
