@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'ads.dart';
+import 'billing.dart';
 
 const String _prefsKeyV1 = 'merge_blocks_save_v1';
 
@@ -360,6 +361,16 @@ Random _rng = Random();
     'shopTitle': 'Diamond Shop',
     'buy': 'Buy',
     'free': 'FREE',
+    'watchAdShort': 'Watch a short video',
+    'bestValue': 'Best value',
+    'noAdsTitle': 'Remove ads',
+    'noAdsSub': 'No banner ads, forever',
+    'owned': 'Purchased',
+    'noAdsThanks': 'Ads removed – thank you!',
+    'storeUnavailable': 'Store not available right now',
+    'buyPending': 'Payment pending…',
+    'buyCanceled': 'Purchase canceled',
+    'buyError': 'Purchase failed',
     'adNotReady': 'Ad not ready, try again soon',
     'reshuffled': 'No moves – board shuffled',
     'pauseText': 'Resume, or start a new board. Your diamonds are kept.',
@@ -388,6 +399,16 @@ Random _rng = Random();
     'shopTitle': 'Diamant-Shop',
     'buy': 'Kaufen',
     'free': 'GRATIS',
+    'watchAdShort': 'Kurzes Video ansehen',
+    'bestValue': 'Bester Preis',
+    'noAdsTitle': 'Werbung entfernen',
+    'noAdsSub': 'Keine Bannerwerbung, für immer',
+    'owned': 'Gekauft',
+    'noAdsThanks': 'Werbung entfernt – danke!',
+    'storeUnavailable': 'Shop gerade nicht verfügbar',
+    'buyPending': 'Zahlung ausstehend…',
+    'buyCanceled': 'Kauf abgebrochen',
+    'buyError': 'Kauf fehlgeschlagen',
     'adNotReady': 'Werbung nicht bereit, bitte gleich nochmal',
     'reshuffled': 'Keine Züge – Feld gemischt',
     'pauseText': 'Weiterspielen oder neues Feld starten. Deine Diamanten bleiben.',
@@ -430,6 +451,7 @@ Random _rng = Random();
       if (!_gridReady) _resetBoard(hard: true);
       _ensureMovesAvailable();
       _startAutoSave();
+      _initBilling();
       if (!mounted) return;
       setState(() => _booting = false);
       // Günlük giriş ödülü (7 günlük seri). Gün içinde alınmışsa gösterilmez.
@@ -441,6 +463,212 @@ Random _rng = Random();
     }();
   }
 
+
+  // ===== Satın alma =====
+
+  void _initBilling() {
+    final b = Billing.instance;
+    b.onDiamonds = (amount, id) {
+      if (!mounted) return;
+      diamonds += amount;
+      _animateDiamondGain(amount);
+      _showToast('+$amount 💎');
+      _saveToBlob();
+      setState(() {});
+    };
+    b.onMessage = (code) {
+      if (!mounted) return;
+      final key = switch (code) {
+        'pending' => 'buyPending',
+        'canceled' => 'buyCanceled',
+        'error' => 'buyError',
+        'noAds' => 'noAdsThanks',
+        _ => null,
+      };
+      if (key != null) _showToast(t(key));
+      setState(() {});
+    };
+    b.init().then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _buy(String id) {
+    Billing.instance.buy(id).then((started) {
+      if (!started && mounted) _showToast(t('storeUnavailable'));
+    });
+  }
+
+  void _openShopSheet() {
+    final b = Billing.instance;
+    if (b.available && b.products.isEmpty) b.refreshProducts();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF0A1434),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
+      builder: (ctx) {
+        Widget row({
+          required Widget leading,
+          required String title,
+          String? subtitle,
+          required String price,
+          required VoidCallback? onTap,
+          Color accent = const Color(0xFF8CF3FF),
+          bool highlight = false,
+        }) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 9),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(18),
+                onTap: onTap,
+                child: Ink(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(18),
+                    gradient: LinearGradient(
+                      colors: highlight
+                          ? [accent.withOpacity(0.22), accent.withOpacity(0.08)]
+                          : [Colors.white.withOpacity(0.07), Colors.white.withOpacity(0.03)],
+                    ),
+                    border: Border.all(color: highlight ? accent.withOpacity(0.7) : Colors.white.withOpacity(0.10)),
+                  ),
+                  child: Row(children: [
+                    leading,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900)),
+                          if (subtitle != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(subtitle, style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12, fontWeight: FontWeight.w600)),
+                            ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(99),
+                        gradient: LinearGradient(colors: [accent, Color.lerp(accent, Colors.black, 0.25)!]),
+                      ),
+                      child: Text(price, style: const TextStyle(color: Color(0xFF071033), fontSize: 13.5, fontWeight: FontWeight.w900)),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
+          );
+        }
+
+        Widget gemIcon(int n) {
+          final size = n >= 750 ? 34.0 : n >= 500 ? 31.0 : n >= 250 ? 28.0 : 25.0;
+          return Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(colors: [const Color(0xFF5BE7FF).withOpacity(0.45), Colors.transparent]),
+            ),
+            child: Icon(Icons.diamond_rounded, size: size, color: const Color(0xFFA8F9FF)),
+          );
+        }
+
+        return StatefulBuilder(builder: (ctx, setSheet) {
+          return ValueListenableBuilder<bool>(
+            valueListenable: b.noAds,
+            builder: (ctx, noAds, _) {
+              final packs = Skus.diamondPacks.where((id) => b.products.containsKey(id)).toList();
+              final best = packs.isEmpty ? null : packs.last;
+              return SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(width: 44, height: 5, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(99))),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(children: [
+                        const Icon(Icons.diamond_rounded, color: Color(0xFFB388FF)),
+                        const SizedBox(width: 8),
+                        Text(t('shopTitle'), style: _neon(20, opacity: 0.98)),
+                        const Spacer(),
+                        Text('$diamonds', style: _neon(16)),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.diamond_rounded, size: 16, color: Color(0xFF8CF3FF)),
+                      ]),
+                      const SizedBox(height: 14),
+                      row(
+                        leading: const SizedBox(width: 46, height: 46, child: Icon(Icons.smart_display_rounded, color: Color(0xFF5BF5B0), size: 30)),
+                        title: '+10 💎',
+                        subtitle: t('watchAdShort'),
+                        price: t('free'),
+                        accent: const Color(0xFF5BF5B0),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _watchAdForDiamonds();
+                        },
+                      ),
+                      if (!b.available)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 18),
+                          child: Text(t('storeUnavailable'), textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withOpacity(0.7))),
+                        )
+                      else if (packs.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 22),
+                          child: Center(child: SizedBox(width: 26, height: 26, child: CircularProgressIndicator(strokeWidth: 2.5))),
+                        )
+                      else
+                        ...packs.map((id) {
+                          final n = Skus.diamondsFor(id);
+                          return row(
+                            leading: gemIcon(n),
+                            title: '$n 💎',
+                            subtitle: id == best ? t('bestValue') : null,
+                            price: b.products[id]!.price,
+                            highlight: id == best,
+                            accent: id == best ? const Color(0xFFFFD76A) : const Color(0xFF8CF3FF),
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              _buy(id);
+                            },
+                          );
+                        }),
+                      if (b.products.containsKey(Skus.noAds))
+                        row(
+                          leading: const SizedBox(width: 46, height: 46, child: Icon(Icons.block_rounded, color: Color(0xFFFF8FB1), size: 30)),
+                          title: t('noAdsTitle'),
+                          subtitle: noAds ? t('owned') : t('noAdsSub'),
+                          price: noAds ? '✓' : b.products[Skus.noAds]!.price,
+                          accent: const Color(0xFFFF8FB1),
+                          onTap: noAds
+                              ? null
+                              : () {
+                                  Navigator.pop(ctx);
+                                  _buy(Skus.noAds);
+                                },
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        });
+      },
+    ).then((_) {
+      if (mounted) setState(() {});
+    });
+  }
 
   // ===== Game logic =====
 
@@ -1985,7 +2213,7 @@ void _handleDuplicateTap(Pos p) {
                     const SizedBox(width: 6),
                     Text('$diamonds', style: _neon(16)),
                     const SizedBox(width: 8),
-                    _tinyButton(icon: Icons.add, onTap: _watchAdForDiamonds),
+                    _tinyButton(icon: Icons.add, onTap: _openShopSheet),
                   ],
                 ),
               ),

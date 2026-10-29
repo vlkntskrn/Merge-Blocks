@@ -29,6 +29,12 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Billing Library sürümü
+        run: |
+          v=$(grep -A2 "name: in_app_purchase_android" pubspec.lock | grep version | head -1)
+          d=$(find "$HOME/.pub-cache/hosted" -path "*in_app_purchase_android-*/android/build.gradle*" -exec grep -ho "billingclient:billing[^\"']*" {} \; | sort -u | tr '\n' ' ')
+          echo "::notice title=billing::in_app_purchase_android ${v} → ${d}"
+
       - name: Analyze
         run: |
           set +e

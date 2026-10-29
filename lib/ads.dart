@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
+import 'billing.dart';
+
 /// AdMob reklam birimi kimlikleri.
 ///
 /// Android: gerçek AdMob birimleri (uygulama ca-app-pub-5300613532774934~9633273706).
@@ -175,6 +177,13 @@ class _BannerSlotState extends State<BannerSlot> {
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: Billing.instance.noAds,
+      builder: (context, noAds, _) => noAds ? const SizedBox.shrink() : _slot(),
+    );
+  }
+
+  Widget _slot() {
     final ad = _ad;
     return SizedBox(
       height: widget.height,

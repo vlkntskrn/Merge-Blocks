@@ -3,6 +3,7 @@
     <!-- Ağ erişimi (AdMob + Billing + genel internet işlemleri) -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="com.android.vending.BILLING" />
 
     <!-- Kamerayı kullanmıyorsan kapalı tut -->
     <!-- <uses-permission android:name="android.permission.CAMERA" /> -->
