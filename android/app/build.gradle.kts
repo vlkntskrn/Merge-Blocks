@@ -1,8 +1,20 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // Flutter Gradle Plugin, Android ve Kotlin pluginlerinden sonra gelmeli
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// Release imzası: android/key.properties (repoya eklenmez, .gitignore'da).
+// CI (Codemagic) bu dosyayı ortam değişkenlerinden üretir. Dosya yoksa (yerel / GitHub Actions
+// test derlemesi) release debug anahtarıyla imzalanır; böyle bir paket Google Play'e yüklenemez.
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -33,11 +45,24 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // Şimdilik debug signing (internal test / CI build için)
-            // Production'a geçerken gerçek release keystore bağlayacağız
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (keystorePropertiesFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
 
             isMinifyEnabled = false
             isShrinkResources = false

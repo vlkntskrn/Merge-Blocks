@@ -11,7 +11,7 @@ workflows:
       # CM_KEYSTORE_PASSWORD, CM_KEY_PASSWORD, CM_KEY_ALIAS
       # Ayrıca keystore dosyasını "Secure files" olarak ekleyip ismini CM_KEYSTORE_PATH ile referanslayacağız.
       vars:
-        PACKAGE_NAME: "com.yourcompany.merge_blocks" # <-- düzelt
+        PACKAGE_NAME: "com.vlkntskrn.mergeblocksneonchain"
         # Secure files'tan gelen dosyanın cihaz içi yolu:
         CM_KEYSTORE_PATH: "$CM_BUILD_DIR/android/app/upload-keystore.jks"
 
@@ -63,8 +63,8 @@ workflows:
           # build.gradle storeFile relative path kullansın diye keystore'u android/app içine kopyala
           cp "$CM_KEYSTORE_PATH" android/app/upload-keystore.jks
 
-          echo "key.properties created:"
-          cat android/key.properties
+          # Şifreler loga yazılmaz; yalnız dosyanın oluştuğu doğrulanır
+          test -s android/key.properties && echo "key.properties created"
 
       - name: Flutter analyze (optional)
         script: flutter analyze || true
@@ -83,7 +83,6 @@ workflows:
     artifacts:
       - build/app/outputs/bundle/release/*.aab
       - build/app/outputs/flutter-apk/app-release.apk
-      - android/key.properties
       - flutter_drive.log
 
     publishing:
