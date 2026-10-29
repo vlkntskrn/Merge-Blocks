@@ -1,0 +1,60 @@
+name: Screenshots
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "fix/release-readiness" ]
+    paths: [ "lib/**", ".github/workflows/screenshots.yml" ]
+
+permissions:
+  contents: write
+
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build web
+        run: |
+          flutter pub get
+          flutter build web --release --no-web-resources-cdn
+
+      - name: Take screenshots
+        run: |
+          cd build/web && (python3 -m http.server 8080 >/dev/null 2>&1 &) && cd ../..
+          mkdir -p /tmp/shots && cd /tmp/shots
+          npm init -y >/dev/null && npm i playwright@1.48.2 >/dev/null && npx playwright install --with-deps chromium >/dev/null
+          cat > shot.js <<'EOF'
+          const { chromium } = require('playwright');
+          (async () => {
+            const b = await chromium.launch();
+            const p = await b.newPage({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+            p.on('console', m => console.log('console:', m.text()));
+            await p.goto('http://localhost:8080/', { waitUntil: 'networkidle' });
+            await p.waitForTimeout(8000);
+            await p.screenshot({ path: '/tmp/shots/01-acilis.png' });
+            // Ortadaki taşlara dokunup bir zincir sürükle (görünüm için)
+            await p.mouse.move(120, 420); await p.mouse.down();
+            for (const [x, y] of [[200, 420], [280, 420], [280, 500], [200, 500]]) { await p.mouse.move(x, y, { steps: 6 }); }
+            await p.screenshot({ path: '/tmp/shots/02-zincir.png' });
+            await p.mouse.up();
+            await p.waitForTimeout(1500);
+            await p.screenshot({ path: '/tmp/shots/03-birlesme.png' });
+            await b.close();
+          })();
+          EOF
+          node shot.js
+
+      - name: Push screenshots branch
+        run: |
+          cd /tmp/shots
+          git init -q -b screenshots
+          git add *.png
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "screenshots ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" screenshots
