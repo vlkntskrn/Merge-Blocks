@@ -29,21 +29,9 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Billing sürümleri (pub.dev)
-        run: |
-          out=""
-          for v in $(curl -s https://pub.dev/api/packages/in_app_purchase_android | python3 -c "import sys,json;d=json.load(sys.stdin);print(' '.join(x['version'] for x in d['versions'][-8:]))"); do
-            u="https://pub.dev/api/archives/in_app_purchase_android-$v.tar.gz"
-            b=$(curl -sL "$u" | tar -xzO --wildcards '*android/build.gradle*' 2>/dev/null | grep -o "billingclient:billing[^\"']*" | head -1)
-            sdk=$(curl -s https://pub.dev/api/packages/in_app_purchase_android/versions/$v | python3 -c "import sys,json;print(json.load(sys.stdin)['pubspec']['environment'])")
-            out="$out $v=$b $sdk |"
-          done
-          echo "::notice title=versions::$out"
-          echo "::notice title=flutter::$(flutter --version | head -1)"
-
       - name: Billing Library sürümü
         run: |
-          v=$(grep -A2 "name: in_app_purchase_android" pubspec.lock | grep version | head -1)
+          v=$(grep -A5 "^  in_app_purchase_android:" pubspec.lock | grep version | head -1)
           d=$(find "$HOME/.pub-cache/hosted" -path "*in_app_purchase_android-*/android/build.gradle*" -exec grep -ho "billingclient:billing[^\"']*" {} \; | sort -u | tr '\n' ' ')
           echo "::notice title=billing::in_app_purchase_android ${v} → ${d}"
 

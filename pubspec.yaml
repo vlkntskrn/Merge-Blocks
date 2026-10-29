@@ -17,9 +17,9 @@ dependencies:
   # AdMob (banner / rewarded / interstitial)
   google_mobile_ads: ^5.1.0
 
-  # Google Play Billing (elmas paketleri + reklamsız). Billing Library 8 için android uygulaması ^0.4.0
+  # Google Play Billing (elmas paketleri + reklamsız). Billing Library 8+ için in_app_purchase_android ^0.5.0 (0.5.5 = Billing 9.1)
   in_app_purchase: ^3.2.3
-  in_app_purchase_android: ^0.4.0
+  in_app_purchase_android: ^0.5.0
 
 dev_dependencies:
   flutter_test:
