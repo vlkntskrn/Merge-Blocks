@@ -7,18 +7,17 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 /// AdMob reklam birimi kimlikleri.
 ///
-/// ŞU AN GOOGLE'IN TEST KİMLİKLERİ. Test reklamı gösterir, gelir getirmez.
-/// Yayından önce AdMob panelinde (yayıncı pub-5300613532774934) bu uygulama için
-/// bir "Ödüllü" ve bir "Banner" birimi açıp aşağıdaki iki Android kimliğini değiştirin.
-/// Ayrıca AndroidManifest.xml içindeki APPLICATION_ID'yi kendi uygulama kimliğinizle değiştirin.
+/// Android: gerçek AdMob birimleri (uygulama ca-app-pub-5300613532774934~9633273706).
+/// iOS: henüz AdMob'da iOS uygulaması yok, Google test kimlikleri kullanılıyor.
+/// Geliştirirken kendi reklamınıza tıklamayın; test için cihazı AdMob'da test cihazı olarak ekleyin.
 class AdIds {
   static String get rewarded => Platform.isIOS
       ? 'ca-app-pub-3940256099942544/1712485313'
-      : 'ca-app-pub-3940256099942544/5224354917';
+      : 'ca-app-pub-5300613532774934/8287092931'; // rewarded_main
 
   static String get banner => Platform.isIOS
       ? 'ca-app-pub-3940256099942544/2934735716'
-      : 'ca-app-pub-3940256099942544/6300978111';
+      : 'ca-app-pub-5300613532774934/5417387015'; // banner_bottom
 }
 
 /// GDPR/UMP onayı + AdMob başlatma + ödüllü reklam yönetimi.

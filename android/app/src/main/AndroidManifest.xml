@@ -12,11 +12,10 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
-        <!-- AdMob App ID (TEST) -->
-        <!-- Canlıya geçerken kendi AdMob App ID'n ile değiştir -->
+        <!-- AdMob App ID (Merge Blocks Neon Chain) -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713" />
+            android:value="ca-app-pub-5300613532774934~9633273706" />
 
         <activity
             android:name=".MainActivity"
